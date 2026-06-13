@@ -40,7 +40,8 @@ CleanSolve Studio의 기본 흐름은 다음과 같습니다.
 현재 `main` 브랜치에는 프로젝트의 기준 문서가 올라와 있습니다. 실제 scaffold 구현은 별도 작업 브랜치에서 진행 중이며, 완료 전까지 이 README의 실행 방법과 기술 스택 설명은 계획 단계의 안내입니다.
 
 - [SoT.md](./SoT.md): 제품과 아키텍처의 Source of Truth
-- Superpowers 기반 설계/구현 계획 문서: 작업 진행 중인 내부 문서
+- [설계 spec](./docs/superpowers/specs/2026-06-14-cleansolve-studio-scaffold-design.md): 초기 scaffold 설계
+- [구현 plan](./docs/superpowers/plans/2026-06-14-cleansolve-studio-scaffold.md): Superpowers 기반 구현 계획
 
 ## 예정 기술 스택
 
@@ -100,8 +101,12 @@ CLEANSOLVE_STORAGE_ROOT=var/jobs
 
 ## 문서 읽는 순서
 
-처음 보는 사람은 먼저 [SoT.md](./SoT.md)를 읽으면 됩니다.
+처음 보는 사람은 아래 순서로 읽으면 됩니다.
 
-scaffold 작업이 끝나면 README에 실제 실행 방법, 테스트 방법, 디렉터리 구조, 설계 문서 링크를 다시 정리합니다.
+1. [SoT.md](./SoT.md)
+2. [설계 spec](./docs/superpowers/specs/2026-06-14-cleansolve-studio-scaffold-design.md)
+3. [구현 plan](./docs/superpowers/plans/2026-06-14-cleansolve-studio-scaffold.md)
+
+scaffold 작업이 끝나면 README에 실제 실행 방법, 테스트 방법, 디렉터리 구조를 다시 정리합니다.
 
 SoT와 구현이 충돌하는 경우 SoT를 우선합니다.
