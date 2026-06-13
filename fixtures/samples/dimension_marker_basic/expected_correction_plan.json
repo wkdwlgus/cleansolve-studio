@@ -6,7 +6,10 @@
       "issue_id": "issue_auto_001",
       "type": "dimension_endpoint_mismatch",
       "severity": "high",
-      "auto_correctable": true
+      "expected": "freehand dimension marker should represent target range from O to S",
+      "actual": "visible marker appears to cover only partial range",
+      "auto_correctable": true,
+      "correction_action": "patch_candidate_spec_geometry"
     }
   ],
   "actions": [
