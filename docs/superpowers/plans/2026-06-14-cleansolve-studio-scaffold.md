@@ -115,6 +115,7 @@ Create `apps/api/.env.example`:
 OPENAI_API_KEY=
 OPENAI_MODEL_ANALYSIS=
 OPENAI_MODEL_VALIDATION=
+OPENAI_MODEL_IMAGE=
 CLEANSOLVE_STORAGE_ROOT=var/jobs
 ```
 
@@ -199,6 +200,7 @@ For local backend development, create `apps/api/.env`:
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL_ANALYSIS=
 OPENAI_MODEL_VALIDATION=
+OPENAI_MODEL_IMAGE=
 CLEANSOLVE_STORAGE_ROOT=var/jobs
 ```
 
@@ -1590,6 +1592,9 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Settings:
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
+    openai_model_analysis: str | None = os.getenv("OPENAI_MODEL_ANALYSIS")
+    openai_model_validation: str | None = os.getenv("OPENAI_MODEL_VALIDATION")
+    openai_model_image: str | None = os.getenv("OPENAI_MODEL_IMAGE")
     storage_root: str = os.getenv("CLEANSOLVE_STORAGE_ROOT", "var/jobs")
 
 
