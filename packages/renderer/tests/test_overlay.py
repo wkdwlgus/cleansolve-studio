@@ -137,7 +137,7 @@ def test_renderer_skips_malformed_visible_strokes_without_dropping_group_or_labe
     assert 'points="70,52 95,45"' in svg
 
 
-def test_renderer_uses_element_color_for_label_fill():
+def test_renderer_uses_element_color_for_label_fill_and_visible_stroke():
     spec = CandidateSpec(
         job_id="job_render",
         version=1,
@@ -156,7 +156,9 @@ def test_renderer_uses_element_color_for_label_fill():
                     "kind": "freehand_dimension_marker",
                     "target_anchor_start": [20, 80],
                     "target_anchor_end": [120, 40],
-                    "visible_strokes": [],
+                    "visible_strokes": [
+                        {"stroke_id": "s1", "points": [[25, 75], [45, 60]]},
+                    ],
                     "label": "1",
                     "label_anchor": [65, 50],
                     "stroke_continuity": "continuous",
@@ -168,4 +170,46 @@ def test_renderer_uses_element_color_for_label_fill():
     svg = render_overlay_svg(spec)
 
     assert_xml_parseable(svg)
+    assert '<polyline data-stroke-id="s1" points="25,75 45,60" fill="none" stroke="blue"' in svg
     assert '<text x="65" y="50" fill="blue"' in svg
+
+
+def test_renderer_escapes_svg_text_and_attribute_values():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id='el_<unsafe>&"marker"',
+                type="freehand_dimension_marker",
+                color="green",
+                confidence=0.8,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 120, 100]),
+                bbox=[10, 10, 120, 100],
+                geometry={
+                    "kind": "freehand_dimension_marker",
+                    "target_anchor_start": [20, 80],
+                    "target_anchor_end": [120, 40],
+                    "visible_strokes": [
+                        {"stroke_id": 'stroke_<unsafe>&"1"', "points": [[25, 75], [45, 60]]},
+                    ],
+                    "label": '5 < 7 & "quoted"',
+                    "label_anchor": [65, 50],
+                    "stroke_continuity": "continuous",
+                },
+            )
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert 'data-element-id="el_&lt;unsafe&gt;&amp;&quot;marker&quot;"' in svg
+    assert 'data-stroke-id="stroke_&lt;unsafe&gt;&amp;&quot;1&quot;"' in svg
+    assert ">5 &lt; 7 &amp; &quot;quoted&quot;<" in svg
+    assert 'data-element-id="el_<unsafe>&"marker""' not in svg
+    assert 'data-stroke-id="stroke_<unsafe>&"1""' not in svg
+    assert '>5 < 7 & "quoted"<' not in svg
