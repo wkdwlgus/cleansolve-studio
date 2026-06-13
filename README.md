@@ -28,3 +28,5 @@ Do not commit `.env` files. Use environment secrets in CI and deployment.
 ```bash
 python -m pytest
 ```
+
+At the foundation-only checkpoint, pytest may report no tests collected. This is expected until later scaffold tasks add the API, workflow, renderer, spec, and harness tests. After those tests are added, `python -m pytest` is expected to pass.
