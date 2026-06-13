@@ -1,0 +1,29 @@
+[project]
+name = "cleansolve-studio"
+version = "0.1.0"
+description = "Math handwriting cleanup editor scaffold"
+requires-python = ">=3.13"
+dependencies = [
+  "fastapi",
+  "langgraph",
+  "pydantic",
+  "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = [
+  "apps/api/tests",
+  "packages/ai/tests",
+  "packages/harness/tests",
+  "packages/renderer/tests",
+  "packages/spec/tests",
+  "packages/workflow/tests",
+]
+pythonpath = [
+  "apps/api",
+  "packages/ai",
+  "packages/harness",
+  "packages/renderer",
+  "packages/spec",
+  "packages/workflow",
+]

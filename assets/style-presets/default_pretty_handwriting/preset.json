@@ -1,0 +1,11 @@
+{
+  "preset_id": "default_pretty_handwriting",
+  "preset_version": "v1",
+  "source": "system_builtin",
+  "description": "Default operator-managed handwriting style preset for the MVP.",
+  "rendering_notes": {
+    "formula_priority": "accuracy_first",
+    "text_style": "clean_handwritten",
+    "color_preservation": true
+  }
+}
