@@ -22,7 +22,8 @@ def test_mock_analysis_client_returns_dimension_marker_spec():
 
 def test_dimension_marker_partial_spec_matches_mock_client_output():
     expected_spec = CandidateSpec.model_validate_json(
-        (FIXTURE_DIR / "expected_partial_spec.json").read_text()
+        (FIXTURE_DIR / "expected_partial_spec.json").read_text(),
+        strict=True,
     )
     actual_spec = MockAnalysisClient().extract_candidate_spec("fixture_dimension_marker_basic")
 
