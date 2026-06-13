@@ -1,0 +1,6 @@
+{
+  "max_revision_attempts": 2,
+  "expected_revision_attempts": 1,
+  "expected_status": "APPROVED",
+  "expected_visible_review_items": 0
+}
