@@ -14,13 +14,15 @@ class HarnessMetrics:
 def summarize_review_budget(metrics: HarnessMetrics) -> dict[str, float | bool]:
     hitl_exposure_rate = _rate(metrics.jobs_requiring_human_review, metrics.total_jobs)
     average_review_items = _rate(metrics.total_visible_review_items, metrics.total_jobs)
+    has_jobs = metrics.total_jobs > 0
 
     return {
+        "has_jobs": has_jobs,
         "hitl_exposure_rate": hitl_exposure_rate,
         "average_review_items": average_review_items,
-        "passes_hitl_target": hitl_exposure_rate <= 0.2,
-        "passes_average_review_item_target": average_review_items <= 1,
-        "passes_review_item_budget": metrics.jobs_over_review_item_budget == 0,
+        "passes_hitl_target": has_jobs and hitl_exposure_rate <= 0.2,
+        "passes_average_review_item_target": has_jobs and average_review_items <= 1,
+        "passes_review_item_budget": has_jobs and metrics.jobs_over_review_item_budget == 0,
     }
 
 

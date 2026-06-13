@@ -14,13 +14,13 @@ def collect_metrics(specs: list[CandidateSpec]) -> HarnessMetrics:
     jobs_over_review_item_budget = 0
 
     for spec in specs:
-        review_items = visible_review_items(spec, budget=len(spec.elements))
-        review_item_count = len(review_items)
-        total_visible_review_items += review_item_count
+        visible_review_item_count = len(visible_review_items(spec))
+        review_demand_count = sum(1 for element in spec.elements if element.requires_human_review)
+        total_visible_review_items += visible_review_item_count
 
-        if review_item_count > 0:
+        if review_demand_count > 0:
             jobs_requiring_human_review += 1
-        if review_item_count > REVIEW_ITEM_BUDGET:
+        if review_demand_count > REVIEW_ITEM_BUDGET:
             jobs_over_review_item_budget += 1
 
     return HarnessMetrics(
