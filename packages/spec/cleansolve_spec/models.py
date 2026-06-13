@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 PrimitiveType = Literal[
@@ -27,31 +27,35 @@ PrimitiveType = Literal[
 ]
 
 
-class Evidence(BaseModel):
+class CandidateBaseModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class Evidence(CandidateBaseModel):
     source: str
     bbox: list[float] = Field(min_length=4, max_length=4)
 
 
-class StylePreset(BaseModel):
+class StylePreset(CandidateBaseModel):
     source: Literal["system_builtin"]
     preset_id: str
     preset_version: str
     description: str | None = None
 
 
-class Page(BaseModel):
+class Page(CandidateBaseModel):
     width: int = Field(gt=0)
     height: int = Field(gt=0)
 
 
-class Region(BaseModel):
+class Region(CandidateBaseModel):
     id: str
     type: str
     bbox: list[float] = Field(min_length=4, max_length=4)
     preserve_original: bool = True
 
 
-class Element(BaseModel):
+class Element(CandidateBaseModel):
     id: str
     type: PrimitiveType
     source_region: str | None = None
@@ -73,7 +77,7 @@ class Element(BaseModel):
     review_reason: str | None = None
 
 
-class CandidateSpec(BaseModel):
+class CandidateSpec(CandidateBaseModel):
     job_id: str
     version: int = Field(ge=1)
     source_images: dict[str, str]
@@ -84,7 +88,7 @@ class CandidateSpec(BaseModel):
     uncertainties: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class ValidationIssue(BaseModel):
+class ValidationIssue(CandidateBaseModel):
     issue_id: str
     type: str
     severity: Literal["low", "medium", "high"]
@@ -93,7 +97,7 @@ class ValidationIssue(BaseModel):
     auto_correctable: bool = False
 
 
-class ValidationReport(BaseModel):
+class ValidationReport(CandidateBaseModel):
     report_id: str
     passed: bool
     issues: list[ValidationIssue] = Field(default_factory=list)
