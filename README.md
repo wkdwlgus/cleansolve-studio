@@ -18,6 +18,7 @@ For local backend development, create `apps/api/.env`:
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL_ANALYSIS=
 OPENAI_MODEL_VALIDATION=
+OPENAI_MODEL_IMAGE=
 CLEANSOLVE_STORAGE_ROOT=var/jobs
 ```
 
