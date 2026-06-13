@@ -26,7 +26,7 @@ def _render_element(element: Element) -> str:
         return ""
 
     geometry = element.geometry
-    color = element.color or "red"
+    color = element.color or "black"
     attrs = {
         "data-element-id": element.id,
         "data-target-anchor-start": _format_point(geometry.get("target_anchor_start")),
@@ -35,10 +35,11 @@ def _render_element(element: Element) -> str:
     }
 
     children = [
-        _render_visible_stroke(stroke, color)
-        for stroke in geometry.get("visible_strokes", [])
+        rendered_stroke
+        for stroke in _as_sequence(geometry.get("visible_strokes", []))
+        if (rendered_stroke := _render_visible_stroke(stroke, color))
     ]
-    label = _render_label(geometry)
+    label = _render_label(element, geometry, color)
     if label:
         children.append(label)
 
@@ -46,10 +47,17 @@ def _render_element(element: Element) -> str:
     return f"  <g {_render_attrs(attrs)}>\n{inner}\n  </g>"
 
 
-def _render_visible_stroke(stroke: dict[str, Any], color: str) -> str:
+def _render_visible_stroke(stroke: Any, color: str) -> str | None:
+    if not isinstance(stroke, dict):
+        return None
+
+    points = _format_points(stroke.get("points"))
+    if points is None or stroke.get("stroke_id") is None:
+        return None
+
     attrs = {
         "data-stroke-id": stroke.get("stroke_id"),
-        "points": _format_points(stroke.get("points", [])),
+        "points": points,
         "fill": "none",
         "stroke": color,
         "stroke-width": "2",
@@ -59,8 +67,8 @@ def _render_visible_stroke(stroke: dict[str, Any], color: str) -> str:
     return f"    <polyline {_render_attrs(attrs)} />"
 
 
-def _render_label(geometry: dict[str, Any]) -> str:
-    label = geometry.get("label")
+def _render_label(element: Element, geometry: dict[str, Any], color: str) -> str:
+    label = geometry.get("label") or element.label
     anchor = geometry.get("label_anchor")
     if label is None or not _is_point(anchor):
         return ""
@@ -69,7 +77,7 @@ def _render_label(geometry: dict[str, Any]) -> str:
     attrs = {
         "x": _format_number(x),
         "y": _format_number(y),
-        "fill": "red",
+        "fill": color,
         "font-family": "sans-serif",
         "font-size": "16",
     }
@@ -84,8 +92,21 @@ def _render_attrs(attrs: dict[str, Any]) -> str:
     )
 
 
-def _format_points(points: list[Any]) -> str:
-    return " ".join(_format_point(point) for point in points if _is_point(point))
+def _format_points(points: Any) -> str | None:
+    if not isinstance(points, list | tuple) or len(points) < 2:
+        return None
+
+    formatted_points = [_format_point(point) for point in points]
+    if any(point is None for point in formatted_points):
+        return None
+
+    return " ".join(formatted_points)
+
+
+def _as_sequence(value: Any) -> list[Any] | tuple[Any, ...]:
+    if isinstance(value, list | tuple):
+        return value
+    return []
 
 
 def _format_point(point: Any) -> str | None:
