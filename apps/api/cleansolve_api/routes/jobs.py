@@ -1,4 +1,4 @@
-from fastapi import APIRouter, status
+from fastapi import APIRouter, File, UploadFile, status
 
 from cleansolve_api.artifacts import LocalArtifactStore, job_response, missing_required_images_error
 from cleansolve_api.settings import settings
@@ -14,6 +14,28 @@ def _store() -> LocalArtifactStore:
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_job() -> dict[str, object]:
     return job_response(_store().create_job())
+
+
+@router.post("/{job_id}/images/problem", status_code=status.HTTP_201_CREATED)
+async def upload_problem_image(job_id: str, file: UploadFile = File(...)) -> dict[str, object]:
+    manifest, artifact = await _store().save_image(job_id, "problem", file)
+    return {
+        "job_id": manifest.job_id,
+        "role": "problem",
+        "artifact": artifact.model_dump(mode="json"),
+        "latest_image_artifact_ids": manifest.latest_image_artifact_ids,
+    }
+
+
+@router.post("/{job_id}/images/teacher-solution", status_code=status.HTTP_201_CREATED)
+async def upload_teacher_solution_image(job_id: str, file: UploadFile = File(...)) -> dict[str, object]:
+    manifest, artifact = await _store().save_image(job_id, "teacher_solution", file)
+    return {
+        "job_id": manifest.job_id,
+        "role": "teacher_solution",
+        "artifact": artifact.model_dump(mode="json"),
+        "latest_image_artifact_ids": manifest.latest_image_artifact_ids,
+    }
 
 
 @router.post("/{job_id}/run")

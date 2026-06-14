@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
 ImageRole = Literal["problem", "teacher_solution"]
@@ -61,6 +62,14 @@ def _new_job_id() -> str:
 
 def _new_artifact_id() -> str:
     return f"img_{uuid4().hex}"
+
+
+def _detect_magic_type(data_prefix: bytes) -> str | None:
+    if data_prefix.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data_prefix.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    return None
 
 
 def _error(code: str, status_code: int, fields: dict[str, Any] | None = None) -> HTTPException:
@@ -162,6 +171,89 @@ class LocalArtifactStore:
         )
         self.save_manifest(updated_manifest)
         return updated_manifest
+
+    async def save_image(
+        self,
+        job_id: str,
+        role: ImageRole,
+        upload: UploadFile,
+    ) -> tuple[JobManifest, ImageArtifact]:
+        manifest = self.get_job(job_id)
+        content_type = upload.content_type
+        if content_type not in ALLOWED_IMAGE_MIME_TYPES:
+            raise _error(
+                "UNSUPPORTED_IMAGE_TYPE",
+                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                {
+                    "allowed": sorted(ALLOWED_IMAGE_MIME_TYPES),
+                    "received": content_type,
+                },
+            )
+
+        artifact_id = _new_artifact_id()
+        extension: ImageExtension = "png" if content_type == "image/png" else "jpg"
+        role_directory = self._role_directory(job_id, role)
+        relative_path = f"artifacts/images/{role}/{artifact_id}.{extension}"
+        final_path = self._job_root(job_id) / relative_path
+        temp_path = final_path.with_name(f"{artifact_id}.{extension}.tmp")
+        digest = hashlib.sha256()
+        size_bytes = 0
+        first_chunk = b""
+
+        try:
+            role_directory.mkdir(parents=True, exist_ok=True)
+            with temp_path.open("wb") as output:
+                while chunk := await upload.read(UPLOAD_CHUNK_BYTES):
+                    if not first_chunk:
+                        first_chunk = chunk
+                    size_bytes += len(chunk)
+                    if size_bytes > MAX_IMAGE_UPLOAD_BYTES:
+                        output.close()
+                        temp_path.unlink(missing_ok=True)
+                        raise _error(
+                            "IMAGE_TOO_LARGE",
+                            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            {"max_size_bytes": MAX_IMAGE_UPLOAD_BYTES},
+                        )
+                    digest.update(chunk)
+                    output.write(chunk)
+
+            if size_bytes == 0:
+                temp_path.unlink(missing_ok=True)
+                raise _error("EMPTY_IMAGE", status.HTTP_400_BAD_REQUEST)
+
+            if _detect_magic_type(first_chunk) != content_type:
+                temp_path.unlink(missing_ok=True)
+                raise _error(
+                    "INVALID_IMAGE_BYTES",
+                    status.HTTP_400_BAD_REQUEST,
+                    {"reason": "mime_magic_mismatch"},
+                )
+
+            artifact = ImageArtifact(
+                artifact_id=artifact_id,
+                role=role,
+                mime_type=content_type,
+                extension=extension,
+                size_bytes=size_bytes,
+                sha256=digest.hexdigest(),
+                relative_path=relative_path,
+                created_at=_utc_now(),
+            )
+            final_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path.replace(final_path)
+            manifest.image_artifacts[role].append(artifact)
+            manifest.latest_image_artifact_ids[role] = artifact.artifact_id
+            manifest.updated_at = _utc_now()
+            self.save_manifest(manifest)
+            return manifest, artifact
+        except HTTPException:
+            raise
+        except OSError as exc:
+            temp_path.unlink(missing_ok=True)
+            raise _error("STORAGE_WRITE_FAILED", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
+        finally:
+            await upload.close()
 
     def _job_root(self, job_id: str) -> Path:
         return self.storage_root / job_id
