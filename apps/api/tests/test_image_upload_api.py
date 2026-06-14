@@ -5,13 +5,12 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from cleansolve_api.artifacts import LocalArtifactStore
+from cleansolve_api.artifacts import LocalArtifactStore, MAX_IMAGE_UPLOAD_BYTES
 from cleansolve_api.main import app
 from cleansolve_api.routes import jobs
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 JPEG_BYTES = b"\xff\xd8\xff" + b"\x00" * 16
-MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
 @pytest.fixture(autouse=True)
@@ -39,12 +38,18 @@ def assert_error(response, code: str):
 
 
 class CloseTrackingUpload:
-    def __init__(self, content_type: str):
+    def __init__(self, content_type: str, data: bytes = b""):
         self.content_type = content_type
+        self._data = data
+        self._was_read = False
         self.closed = False
 
     async def read(self, _: int) -> bytes:
-        return b""
+        await asyncio.sleep(0)
+        if self._was_read:
+            return b""
+        self._was_read = True
+        return self._data
 
     async def close(self) -> None:
         self.closed = True
@@ -128,6 +133,41 @@ def test_reupload_same_role_appends_artifact_without_overwriting_previous_file()
     assert artifact_path(job_id, first_artifact["relative_path"]).exists()
     assert artifact_path(job_id, second_artifact["relative_path"]).exists()
     assert job["latest_image_artifact_ids"]["problem"] == second_artifact["artifact_id"]
+
+
+def test_concurrent_same_role_uploads_preserve_both_manifest_records(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    second_bytes = b"\x89PNG\r\n\x1a\n" + b"\x01" * 16
+
+    async def upload_both():
+        await asyncio.gather(
+            store.save_image(
+                manifest.job_id,
+                "problem",
+                CloseTrackingUpload("image/png", PNG_BYTES),
+            ),
+            store.save_image(
+                manifest.job_id,
+                "problem",
+                CloseTrackingUpload("image/png", second_bytes),
+            ),
+        )
+
+    asyncio.run(upload_both())
+
+    job = store.get_job(manifest.job_id)
+    problem_artifacts = job.image_artifacts["problem"]
+
+    assert len(problem_artifacts) == 2
+    assert {artifact.sha256 for artifact in problem_artifacts} == {
+        sha256(PNG_BYTES).hexdigest(),
+        sha256(second_bytes).hexdigest(),
+    }
+    role_directory = (
+        tmp_path / "jobs" / manifest.job_id / "artifacts" / "images" / "problem"
+    )
+    assert len(list(role_directory.glob("*.png"))) == 2
 
 
 def test_upload_unknown_job_returns_structured_404():

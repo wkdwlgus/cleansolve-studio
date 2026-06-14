@@ -4,7 +4,8 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from threading import Lock
+from typing import Any, ClassVar, Literal
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
@@ -110,6 +111,9 @@ def job_response(manifest: JobManifest) -> dict[str, Any]:
 
 
 class LocalArtifactStore:
+    _job_locks: ClassVar[dict[tuple[str, str], Lock]] = {}
+    _job_locks_guard: ClassVar[Lock] = Lock()
+
     def __init__(self, storage_root: Path):
         self.storage_root = storage_root
 
@@ -244,11 +248,13 @@ class LocalArtifactStore:
             )
             final_path.parent.mkdir(parents=True, exist_ok=True)
             temp_path.replace(final_path)
-            manifest.image_artifacts[role].append(artifact)
-            manifest.latest_image_artifact_ids[role] = artifact.artifact_id
-            manifest.updated_at = _utc_now()
-            self.save_manifest(manifest)
-            return manifest, artifact
+            with self._job_lock(job_id):
+                current_manifest = self.get_job(job_id)
+                current_manifest.image_artifacts[role].append(artifact)
+                current_manifest.latest_image_artifact_ids[role] = artifact.artifact_id
+                current_manifest.updated_at = _utc_now()
+                self.save_manifest(current_manifest)
+                return current_manifest, artifact
         except HTTPException:
             raise
         except OSError as exc:
@@ -266,3 +272,10 @@ class LocalArtifactStore:
 
     def _role_directory(self, job_id: str, role: ImageRole) -> Path:
         return self._job_root(job_id) / "artifacts" / "images" / role
+
+    def _job_lock(self, job_id: str) -> Lock:
+        key = (str(self.storage_root), job_id)
+        with self._job_locks_guard:
+            if key not in self._job_locks:
+                self._job_locks[key] = Lock()
+            return self._job_locks[key]
