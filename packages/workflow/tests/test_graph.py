@@ -75,7 +75,7 @@ def test_workflow_revalidates_after_auto_revision_before_approval():
 
 def test_workflow_auto_correction_changes_candidate_spec_geometry():
     original_spec = MockAnalysisClient().extract_candidate_spec("job_patch")
-    original_anchor = deepcopy(original_spec.elements[0].geometry["label_anchor"])
+    original_endpoint = deepcopy(original_spec.elements[0].geometry["target_anchor_end"])
 
     state = run_mock_workflow(
         job_id="job_patch",
@@ -83,12 +83,49 @@ def test_workflow_auto_correction_changes_candidate_spec_geometry():
     )
     element = state["candidate_spec"].elements[0]
 
-    assert element.geometry["label_anchor"] != original_anchor
-    assert element.geometry["label_anchor"] == [300, 620]
+    assert element.geometry["target_anchor_end"] != original_endpoint
+    assert element.geometry["target_anchor_end"] == [540, 850]
     assert element.revision_history == [
         {
             "revision_id": "rev_001",
             "source": "auto_correction",
-            "patch": {"geometry.label_anchor": [300, 620]},
+            "patch": {"geometry.target_anchor_end": [540, 850]},
+        }
+    ]
+
+
+def test_workflow_does_not_approve_unrelated_patch_when_endpoint_mismatch_remains():
+    state = run_mock_workflow(
+        job_id="job_unrelated_patch",
+        correction_patch_override={"geometry.label_anchor": [300, 620]},
+    )
+
+    assert state["status"] == "REVISION_REQUIRED"
+    assert state["revision_attempts"] == 2
+    assert state["inspection_issue"]["type"] == "dimension_endpoint_mismatch"
+    assert state["candidate_spec"].elements[0].geometry["target_anchor_end"] != [540, 850]
+    assert state["correction_plans"][-1]["actions"][0]["patch"] == {
+        "geometry.label_anchor": [300, 620]
+    }
+
+
+def test_revision_required_preserves_visible_human_review_items():
+    candidate_spec = MockAnalysisClient().extract_candidate_spec("job_human_review")
+    candidate_spec.elements[0].requires_human_review = True
+    candidate_spec.elements[0].review_reason = "Endpoint needs operator review."
+
+    state = run_mock_workflow(
+        job_id="job_human_review",
+        candidate_spec_override=candidate_spec,
+        max_revision_attempts=0,
+    )
+
+    assert state["status"] == "REVISION_REQUIRED"
+    assert state["revision_attempts"] == 0
+    assert state["review_items"] == [
+        {
+            "element_id": "el_freehand_dimension_001",
+            "type": "freehand_dimension_marker",
+            "review_reason": "Endpoint needs operator review.",
         }
     ]

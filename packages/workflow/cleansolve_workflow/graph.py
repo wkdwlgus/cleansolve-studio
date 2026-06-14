@@ -59,6 +59,7 @@ def run_mock_workflow(
     *,
     max_revision_attempts: int = 2,
     candidate_spec_override=None,
+    correction_patch_override: dict[str, object] | None = None,
 ) -> WorkflowState:
     app = build_graph()
     initial_state = {
@@ -74,6 +75,8 @@ def run_mock_workflow(
     }
     if candidate_spec_override is not None:
         initial_state["candidate_spec"] = candidate_spec_override
+    if correction_patch_override is not None:
+        initial_state["correction_patch_override"] = correction_patch_override
 
     return app.invoke(initial_state)
 

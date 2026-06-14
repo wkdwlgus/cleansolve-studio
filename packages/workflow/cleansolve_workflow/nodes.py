@@ -6,6 +6,8 @@ from cleansolve_spec.validation import validate_candidate_spec, visible_review_i
 
 from .state import WorkflowState
 
+EXPECTED_TARGET_ANCHOR_END = [540, 850]
+
 
 def load_style_preset(state: WorkflowState) -> WorkflowState:
     state["style_preset"] = {
@@ -39,22 +41,23 @@ def render_preview(state: WorkflowState) -> WorkflowState:
 
 
 def inspect_render(state: WorkflowState) -> WorkflowState:
-    if state.get("revision_attempts", 0) > 0:
+    element = _find_element(state, "el_freehand_dimension_001")
+    actual_endpoint = element.geometry.get("target_anchor_end") if element else None
+    expected_endpoint = EXPECTED_TARGET_ANCHOR_END
+    status = "RE_INSPECTING" if state.get("revision_attempts", 0) > 0 else "INSPECTING"
+
+    if actual_endpoint == expected_endpoint:
         state["inspection_issue"] = None
-        _set_status(state, "RE_INSPECTING")
+        _set_status(state, status)
         return state
 
-    state["inspection_issue"] = {
-        "issue_id": "issue_auto_001",
-        "type": "dimension_endpoint_mismatch",
-        "severity": "high",
-        "element_id": "el_freehand_dimension_001",
-        "expected": "freehand dimension marker should represent target range from O to S",
-        "actual": "visible marker appears to cover only partial range",
-        "auto_correctable": True,
-        "correction_action": "patch_candidate_spec_geometry",
-    }
-    _set_status(state, "INSPECTING")
+    if state.get("revision_attempts", 0) > 0:
+        state["inspection_issue"] = _dimension_endpoint_issue(actual_endpoint)
+        _set_status(state, status)
+        return state
+
+    state["inspection_issue"] = _dimension_endpoint_issue(actual_endpoint)
+    _set_status(state, status)
     return state
 
 
@@ -70,7 +73,10 @@ def plan_correction(state: WorkflowState) -> WorkflowState:
                     "action_id": "act_001",
                     "type": "spec_patch",
                     "element_id": "el_freehand_dimension_001",
-                    "patch": {"geometry.label_anchor": [300, 620]},
+                    "patch": state.get(
+                        "correction_patch_override",
+                        {"geometry.target_anchor_end": EXPECTED_TARGET_ANCHOR_END},
+                    ),
                 }
             ],
             "requires_human_review": False,
@@ -103,7 +109,7 @@ def decide_human_review(state: WorkflowState) -> WorkflowState:
 
 
 def require_revision(state: WorkflowState) -> WorkflowState:
-    state["review_items"] = []
+    state["review_items"] = visible_review_items(state["candidate_spec"])
     _set_status(state, "REVISION_REQUIRED")
     return state
 
@@ -123,6 +129,26 @@ def _apply_spec_patch(candidate_spec, element_id: str, patch: dict[str, object])
             }
         )
         return
+
+
+def _find_element(state: WorkflowState, element_id: str):
+    for element in state["candidate_spec"].elements:
+        if element.id == element_id:
+            return element
+    return None
+
+
+def _dimension_endpoint_issue(actual_endpoint) -> dict[str, object]:
+    return {
+        "issue_id": "issue_auto_001",
+        "type": "dimension_endpoint_mismatch",
+        "severity": "high",
+        "element_id": "el_freehand_dimension_001",
+        "expected": EXPECTED_TARGET_ANCHOR_END,
+        "actual": actual_endpoint,
+        "auto_correctable": True,
+        "correction_action": "patch_candidate_spec_geometry",
+    }
 
 
 def _set_status(state: WorkflowState, status: str) -> None:

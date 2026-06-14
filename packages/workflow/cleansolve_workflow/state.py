@@ -14,3 +14,4 @@ class WorkflowState(TypedDict, total=False):
     style_preset: dict[str, str]
     inspection_issue: dict[str, Any] | None
     status_history: list[str]
+    correction_patch_override: dict[str, Any]
