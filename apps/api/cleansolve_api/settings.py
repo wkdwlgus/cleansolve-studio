@@ -18,7 +18,7 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("OPENAI_MODEL_IMAGE", "gpt-image-1")
     )
     storage_root: Path = Field(
-        default_factory=lambda: Path(os.getenv("STORAGE_ROOT", "var/jobs"))
+        default_factory=lambda: Path(os.getenv("CLEANSOLVE_STORAGE_ROOT", "var/jobs"))
     )
 
 
