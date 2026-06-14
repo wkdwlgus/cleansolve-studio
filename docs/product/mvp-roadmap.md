@@ -54,9 +54,11 @@
 
 ### M1. Image Ingestion & Artifact Storage
 
-상태: Not Started
+상태: Done
 
 상세 설계: [M1 Image Ingestion & Artifact Storage 상세 설계](../superpowers/specs/2026-06-14-image-ingestion-artifacts-design.md)
+
+구현 결과: local filesystem artifact store, problem/teacher-solution image upload API, manifest persistence, run precondition이 구현됨.
 
 목표:
 
