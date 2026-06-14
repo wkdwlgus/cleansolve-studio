@@ -178,29 +178,31 @@ class LocalArtifactStore:
         role: ImageRole,
         upload: UploadFile,
     ) -> tuple[JobManifest, ImageArtifact]:
-        manifest = self.get_job(job_id)
-        content_type = upload.content_type
-        if content_type not in ALLOWED_IMAGE_MIME_TYPES:
-            raise _error(
-                "UNSUPPORTED_IMAGE_TYPE",
-                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                {
-                    "allowed": sorted(ALLOWED_IMAGE_MIME_TYPES),
-                    "received": content_type,
-                },
-            )
-
-        artifact_id = _new_artifact_id()
-        extension: ImageExtension = "png" if content_type == "image/png" else "jpg"
-        role_directory = self._role_directory(job_id, role)
-        relative_path = f"artifacts/images/{role}/{artifact_id}.{extension}"
-        final_path = self._job_root(job_id) / relative_path
-        temp_path = final_path.with_name(f"{artifact_id}.{extension}.tmp")
-        digest = hashlib.sha256()
-        size_bytes = 0
-        first_chunk = b""
+        temp_path: Path | None = None
 
         try:
+            manifest = self.get_job(job_id)
+            content_type = upload.content_type
+            if content_type not in ALLOWED_IMAGE_MIME_TYPES:
+                raise _error(
+                    "UNSUPPORTED_IMAGE_TYPE",
+                    status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    {
+                        "allowed": sorted(ALLOWED_IMAGE_MIME_TYPES),
+                        "received": content_type,
+                    },
+                )
+
+            artifact_id = _new_artifact_id()
+            extension: ImageExtension = "png" if content_type == "image/png" else "jpg"
+            role_directory = self._role_directory(job_id, role)
+            relative_path = f"artifacts/images/{role}/{artifact_id}.{extension}"
+            final_path = self._job_root(job_id) / relative_path
+            temp_path = final_path.with_name(f"{artifact_id}.{extension}.tmp")
+            digest = hashlib.sha256()
+            size_bytes = 0
+            first_chunk = b""
+
             role_directory.mkdir(parents=True, exist_ok=True)
             with temp_path.open("wb") as output:
                 while chunk := await upload.read(UPLOAD_CHUNK_BYTES):
@@ -250,7 +252,8 @@ class LocalArtifactStore:
         except HTTPException:
             raise
         except OSError as exc:
-            temp_path.unlink(missing_ok=True)
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
             raise _error("STORAGE_WRITE_FAILED", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
         finally:
             await upload.close()

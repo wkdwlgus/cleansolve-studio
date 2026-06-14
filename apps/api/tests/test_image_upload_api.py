@@ -1,8 +1,11 @@
+import asyncio
 from hashlib import sha256
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from cleansolve_api.artifacts import LocalArtifactStore
 from cleansolve_api.main import app
 from cleansolve_api.routes import jobs
 
@@ -33,6 +36,18 @@ def assert_error(response, code: str):
     assert payload["detail"]["code"] == code
     assert isinstance(payload["detail"]["message"], str)
     assert isinstance(payload["detail"]["fields"], dict)
+
+
+class CloseTrackingUpload:
+    def __init__(self, content_type: str):
+        self.content_type = content_type
+        self.closed = False
+
+    async def read(self, _: int) -> bytes:
+        return b""
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 def test_upload_problem_png_persists_artifact_and_manifest():
@@ -128,6 +143,22 @@ def test_upload_unknown_job_returns_structured_404():
     assert response.json()["detail"]["fields"] == {"job_id": "job_unknown"}
 
 
+def test_store_closes_upload_when_job_is_unknown(tmp_path):
+    upload = CloseTrackingUpload("image/png")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            LocalArtifactStore(tmp_path / "jobs").save_image(
+                "job_unknown",
+                "problem",
+                upload,
+            )
+        )
+
+    assert exc_info.value.status_code == 404
+    assert upload.closed is True
+
+
 def test_upload_rejects_unsupported_mime_type():
     client = TestClient(app)
     job_id = create_job(client)
@@ -143,6 +174,18 @@ def test_upload_rejects_unsupported_mime_type():
         "allowed": ["image/jpeg", "image/png"],
         "received": "image/gif",
     }
+
+
+def test_store_closes_upload_when_mime_type_is_unsupported(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    upload = CloseTrackingUpload("image/gif")
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(store.save_image(manifest.job_id, "problem", upload))
+
+    assert exc_info.value.status_code == 415
+    assert upload.closed is True
 
 
 def test_upload_rejects_mime_magic_mismatch():
