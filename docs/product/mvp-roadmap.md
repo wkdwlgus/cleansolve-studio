@@ -56,6 +56,8 @@
 
 상태: Not Started
 
+상세 설계: [M1 Image Ingestion & Artifact Storage 상세 설계](../superpowers/specs/2026-06-14-image-ingestion-artifacts-design.md)
+
 목표:
 
 - 사용자가 원본 문제 이미지와 선생님 손풀이 이미지를 job에 업로드할 수 있다.
@@ -323,4 +325,3 @@
 - SoT의 첫 번째 MVP 성공 기준이다.
 - 원본 이미지를 최상위 Source of Truth로 다루는 제품 원칙을 코드로 고정한다.
 - 이후 candidate spec, OpenAI adapter, web upload flow, export가 모두 image artifact를 입력으로 사용한다.
-
