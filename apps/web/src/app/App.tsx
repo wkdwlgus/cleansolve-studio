@@ -1,5 +1,8 @@
 import { EditorCanvas } from '../editor/EditorCanvas';
 import { ReviewPanel } from '../editor/ReviewPanel';
+import { getStylePresetLabel } from '../editor/editorCopy';
+
+const ACTIVE_STYLE_PRESET = 'default_pretty_handwriting';
 
 export function App() {
   return (
@@ -9,8 +12,7 @@ export function App() {
           <div>
             <h1>CleanSolve Studio</h1>
             <p>
-              활성 스타일: <strong>정갈한 손글씨</strong>{' '}
-              <span className="technical-detail">default_pretty_handwriting v1</span>
+              활성 스타일: <strong>{getStylePresetLabel(ACTIVE_STYLE_PRESET)}</strong>
             </p>
           </div>
           <div className="job-summary" aria-label="작업 상태">

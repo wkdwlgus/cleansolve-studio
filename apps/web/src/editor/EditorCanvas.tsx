@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
+import { formatAnchorPatchSummary } from './editorCopy';
 import { isInteractionAllowed } from './interactionPolicy';
 
 interface Point {
@@ -28,16 +29,7 @@ export function EditorCanvas() {
   const canDragStartAnchor = isInteractionAllowed(MARKER_TYPE, 'drag_target_anchor_start');
   const canDragEndAnchor = isInteractionAllowed(MARKER_TYPE, 'drag_target_anchor_end');
 
-  const localSpecPatch = useMemo(
-    () => ({
-      element_id: 'mock-freehand-dimension-marker-1',
-      patch: {
-        target_anchor_start: anchors.start,
-        target_anchor_end: anchors.end
-      }
-    }),
-    [anchors]
-  );
+  const patchSummary = useMemo(() => formatAnchorPatchSummary(anchors), [anchors]);
 
   const canvasSummary = `손그림 치수 표시 시작점은 x ${Math.round(anchors.start.x)}, y ${Math.round(
     anchors.start.y
@@ -173,9 +165,9 @@ export function EditorCanvas() {
           </button>
         </div>
       </div>
-      <pre className="patch-preview" aria-label="로컬 스펙 패치 미리보기">
-        {JSON.stringify(localSpecPatch, null, 2)}
-      </pre>
+      <p className="patch-preview" aria-label="변경 요약">
+        {patchSummary}
+      </p>
     </section>
   );
 }

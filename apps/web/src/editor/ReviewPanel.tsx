@@ -22,7 +22,6 @@ export function ReviewPanel({ items }: ReviewPanelProps) {
             <li key={item.element_id}>
               <strong>{getPrimitiveTypeLabel(item.type)}</strong>
               <span>{getReviewReasonText(item)}</span>
-              <small>요소 ID: {item.element_id}</small>
             </li>
           ))}
         </ul>

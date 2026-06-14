@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ReviewItem } from '../types/spec';
-import { filterHumanReviewItems, getPrimitiveTypeLabel, getReviewReasonText } from './reviewHelpers';
+import {
+  filterHumanReviewItems,
+  getPrimitiveTypeLabel,
+  getReviewReasonText,
+  primitiveTypeLabels
+} from './reviewHelpers';
 
 describe('review helper contracts', () => {
   const items: ReviewItem[] = [
@@ -47,6 +52,13 @@ describe('review helper contracts', () => {
   it('maps primitive IDs to Korean labels', () => {
     expect(getPrimitiveTypeLabel('freehand_dimension_marker')).toBe('손그림 치수 표시');
     expect(getPrimitiveTypeLabel('formula_line')).toBe('수식 줄');
+  });
+
+  it('does not expose raw primitive IDs as review labels', () => {
+    for (const [primitiveId, label] of Object.entries(primitiveTypeLabels)) {
+      expect(label).not.toBe(primitiveId);
+      expect(label).not.toContain('_');
+    }
   });
 
   it('uses a Korean fallback when a review reason is missing', () => {
