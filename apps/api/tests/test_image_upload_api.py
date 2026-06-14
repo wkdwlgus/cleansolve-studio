@@ -1,5 +1,7 @@
 import asyncio
 from hashlib import sha256
+from threading import Event, Thread, current_thread
+from time import sleep
 
 import pytest
 from fastapi import HTTPException
@@ -168,6 +170,80 @@ def test_concurrent_same_role_uploads_preserve_both_manifest_records(tmp_path):
         tmp_path / "jobs" / manifest.job_id / "artifacts" / "images" / "problem"
     )
     assert len(list(role_directory.glob("*.png"))) == 2
+
+
+def test_run_update_does_not_overwrite_concurrent_upload_manifest_record(
+    monkeypatch,
+    tmp_path,
+):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    asyncio.run(
+        store.save_image(
+            manifest.job_id,
+            "problem",
+            CloseTrackingUpload("image/png", PNG_BYTES),
+        )
+    )
+    asyncio.run(
+        store.save_image(
+            manifest.job_id,
+            "teacher_solution",
+            CloseTrackingUpload("image/jpeg", JPEG_BYTES),
+        )
+    )
+    run_read_manifest = Event()
+    allow_run_save = Event()
+    original_get_job = store.get_job
+    errors: list[BaseException] = []
+
+    def delayed_get_job(job_id: str):
+        manifest_snapshot = original_get_job(job_id)
+        if current_thread().name == "run-update":
+            run_read_manifest.set()
+            allow_run_save.wait(timeout=2)
+        return manifest_snapshot
+
+    monkeypatch.setattr(store, "get_job", delayed_get_job)
+
+    def update_after_run():
+        try:
+            store.update_after_run(
+                job_id=manifest.job_id,
+                status_value="APPROVED",
+                revision_attempts=1,
+                review_items=[],
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    def upload_problem_again():
+        try:
+            reupload_bytes = b"\x89PNG\r\n\x1a\n" + b"\x02" * 16
+            asyncio.run(
+                store.save_image(
+                    manifest.job_id,
+                    "problem",
+                    CloseTrackingUpload("image/png", reupload_bytes),
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    run_thread = Thread(target=update_after_run, name="run-update")
+    upload_thread = Thread(target=upload_problem_again, name="upload-problem")
+    run_thread.start()
+    assert run_read_manifest.wait(timeout=2)
+    upload_thread.start()
+    sleep(0.05)
+    allow_run_save.set()
+    run_thread.join(timeout=2)
+    upload_thread.join(timeout=2)
+
+    assert not run_thread.is_alive()
+    assert not upload_thread.is_alive()
+    assert errors == []
+    assert len(original_get_job(manifest.job_id).image_artifacts["problem"]) == 2
 
 
 def test_upload_unknown_job_returns_structured_404():

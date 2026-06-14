@@ -163,18 +163,19 @@ class LocalArtifactStore:
         revision_attempts: int,
         review_items: list[dict[str, Any]],
     ) -> JobManifest:
-        manifest = self.get_job(job_id)
-        updated_manifest = JobManifest.model_validate(
-            {
-                **manifest.model_dump(mode="python"),
-                "status": status_value,
-                "revision_attempts": revision_attempts,
-                "review_items": review_items,
-                "updated_at": _utc_now(),
-            }
-        )
-        self.save_manifest(updated_manifest)
-        return updated_manifest
+        with self._job_lock(job_id):
+            manifest = self.get_job(job_id)
+            updated_manifest = JobManifest.model_validate(
+                {
+                    **manifest.model_dump(mode="python"),
+                    "status": status_value,
+                    "revision_attempts": revision_attempts,
+                    "review_items": review_items,
+                    "updated_at": _utc_now(),
+                }
+            )
+            self.save_manifest(updated_manifest)
+            return updated_manifest
 
     async def save_image(
         self,
