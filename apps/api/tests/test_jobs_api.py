@@ -80,3 +80,27 @@ def test_settings_use_cleansolve_storage_root(monkeypatch):
     settings = Settings()
 
     assert settings.storage_root == Path("var/custom-jobs")
+
+
+def test_settings_load_apps_api_env_file(monkeypatch, tmp_path):
+    env_file = tmp_path / "api.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "OPENAI_API_KEY=sk-from-env-file",
+                "OPENAI_MODEL_ANALYSIS=gpt-analysis-file",
+                "CLEANSOLVE_STORAGE_ROOT=var/env-file-jobs",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL_ANALYSIS", raising=False)
+    monkeypatch.delenv("CLEANSOLVE_STORAGE_ROOT", raising=False)
+    monkeypatch.setenv("CLEANSOLVE_API_ENV_FILE", str(env_file))
+
+    settings = Settings()
+
+    assert settings.openai_api_key == "sk-from-env-file"
+    assert settings.openai_model_analysis == "gpt-analysis-file"
+    assert settings.storage_root == Path("var/env-file-jobs")

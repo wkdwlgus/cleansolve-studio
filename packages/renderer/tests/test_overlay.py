@@ -54,6 +54,79 @@ def test_renderer_preserves_dimension_target_and_visible_strokes():
     assert ">1<" in svg
 
 
+def test_renderer_renders_dimension_line_with_target_anchors():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_dimension_line",
+                type="dimension_line",
+                color="purple",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 150, 90]),
+                bbox=[10, 10, 150, 90],
+                geometry={
+                    "kind": "dimension_line",
+                    "target_anchor_start": [20, 80],
+                    "target_anchor_end": [140, 80],
+                    "label": "12",
+                    "label_anchor": [75, 64],
+                },
+            )
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert 'data-element-id="el_dimension_line"' in svg
+    assert 'data-primitive-type="dimension_line"' in svg
+    assert 'data-target-anchor-start="20,80"' in svg
+    assert 'data-target-anchor-end="140,80"' in svg
+    assert '<line x1="20" y1="80" x2="140" y2="80" stroke="purple"' in svg
+    assert ">12<" in svg
+
+
+def test_renderer_renders_dimension_curve_with_control_points():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_dimension_curve",
+                type="dimension_curve",
+                color="green",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 150, 120]),
+                bbox=[10, 10, 150, 120],
+                geometry={
+                    "kind": "dimension_curve",
+                    "target_anchor_start": [20, 90],
+                    "target_anchor_end": [140, 90],
+                    "curve_control_points": [[55, 30], [105, 30]],
+                    "label": "r",
+                    "label_anchor": [75, 42],
+                },
+            )
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert 'data-element-id="el_dimension_curve"' in svg
+    assert 'data-primitive-type="dimension_curve"' in svg
+    assert '<path d="M 20,90 C 55,30 105,30 140,90" fill="none" stroke="green"' in svg
+    assert ">r<" in svg
+
+
 def test_renderer_uses_element_label_when_geometry_label_is_missing():
     spec = CandidateSpec(
         job_id="job_render",

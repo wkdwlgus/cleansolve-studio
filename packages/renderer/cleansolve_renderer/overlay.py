@@ -22,6 +22,10 @@ def render_overlay_svg(spec: CandidateSpec) -> str:
 
 
 def _render_element(element: Element) -> str:
+    if element.type == "dimension_line":
+        return _render_dimension_line(element)
+    if element.type == "dimension_curve":
+        return _render_dimension_curve(element)
     if element.type != "freehand_dimension_marker":
         return ""
 
@@ -29,6 +33,7 @@ def _render_element(element: Element) -> str:
     color = element.color or "black"
     attrs = {
         "data-element-id": element.id,
+        "data-primitive-type": element.type,
         "data-target-anchor-start": _format_point(geometry.get("target_anchor_start")),
         "data-target-anchor-end": _format_point(geometry.get("target_anchor_end")),
         "data-stroke-continuity": geometry.get("stroke_continuity"),
@@ -45,6 +50,76 @@ def _render_element(element: Element) -> str:
 
     inner = "\n".join(child for child in children if child)
     return f"  <g {_render_attrs(attrs)}>\n{inner}\n  </g>"
+
+
+def _render_dimension_line(element: Element) -> str:
+    geometry = element.geometry
+    start = geometry.get("target_anchor_start")
+    end = geometry.get("target_anchor_end")
+    if not _is_point(start) or not _is_point(end):
+        return ""
+
+    x1, y1 = start
+    x2, y2 = end
+    color = element.color or "black"
+    attrs = _dimension_group_attrs(element, geometry)
+    line_attrs = {
+        "x1": _format_number(x1),
+        "y1": _format_number(y1),
+        "x2": _format_number(x2),
+        "y2": _format_number(y2),
+        "stroke": color,
+        "stroke-width": "2",
+        "stroke-linecap": "round",
+    }
+    children = [f"    <line {_render_attrs(line_attrs)} />"]
+    label = _render_label(element, geometry, color)
+    if label:
+        children.append(label)
+
+    return f"  <g {_render_attrs(attrs)}>\n" + "\n".join(children) + "\n  </g>"
+
+
+def _render_dimension_curve(element: Element) -> str:
+    geometry = element.geometry
+    start = geometry.get("target_anchor_start")
+    end = geometry.get("target_anchor_end")
+    control_points = _as_sequence(geometry.get("curve_control_points"))
+    if not _is_point(start) or not _is_point(end) or len(control_points) < 2:
+        return ""
+
+    first_control, second_control = control_points[0], control_points[1]
+    if not _is_point(first_control) or not _is_point(second_control):
+        return ""
+
+    color = element.color or "black"
+    attrs = _dimension_group_attrs(element, geometry)
+    path_attrs = {
+        "d": (
+            f"M {_format_point(start)} C "
+            f"{_format_point(first_control)} {_format_point(second_control)} {_format_point(end)}"
+        ),
+        "fill": "none",
+        "stroke": color,
+        "stroke-width": "2",
+        "stroke-linecap": "round",
+        "stroke-linejoin": "round",
+    }
+    children = [f"    <path {_render_attrs(path_attrs)} />"]
+    label = _render_label(element, geometry, color)
+    if label:
+        children.append(label)
+
+    return f"  <g {_render_attrs(attrs)}>\n" + "\n".join(children) + "\n  </g>"
+
+
+def _dimension_group_attrs(element: Element, geometry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "data-element-id": element.id,
+        "data-primitive-type": element.type,
+        "data-target-anchor-start": _format_point(geometry.get("target_anchor_start")),
+        "data-target-anchor-end": _format_point(geometry.get("target_anchor_end")),
+    }
 
 
 def _render_visible_stroke(stroke: Any, color: str) -> str | None:

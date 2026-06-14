@@ -1,6 +1,6 @@
-# Initial Workflow
+# 초기 Workflow
 
-The first runtime workflow uses LangGraph and follows this path:
+첫 runtime workflow는 LangGraph를 사용하며 아래 경로를 따른다.
 
 ```text
 CREATED
@@ -14,6 +14,6 @@ AUTO_REVISING
 APPROVED or NEEDS_REVIEW
 ```
 
-The workflow loads the system built-in style preset, uses a mock analysis client to produce a candidate spec, validates that spec, renders an SVG overlay preview, inspects the render with a deterministic mock issue, creates a correction plan before correction, applies one bounded automatic revision, then exposes only `requires_human_review=true` items.
+workflow는 시스템 내장 스타일 프리셋을 로드하고, mock analysis client로 candidate spec을 만든다. 이후 spec 검증, SVG overlay preview 렌더링, deterministic mock issue 검사, correction plan 생성, 제한된 자동 revision 적용을 거친다. 마지막으로 `requires_human_review=true` 항목만 사용자 review 대상으로 노출한다.
 
-`max_revision_attempts` defaults to `2`. Later workflow tests will assert the mock workflow auto-revises before HITL and ends with no visible review items.
+`max_revision_attempts` 기본값은 `2`다. 현재 테스트는 mock workflow가 HITL 이전에 자동 revision을 수행하고, 보이는 review item 없이 승인 상태로 끝나는 흐름을 검증한다.
