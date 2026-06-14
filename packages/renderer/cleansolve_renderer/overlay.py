@@ -54,8 +54,8 @@ def _render_element(element: Element) -> str:
 
 def _render_dimension_line(element: Element) -> str:
     geometry = element.geometry
-    start = geometry.get("target_anchor_start")
-    end = geometry.get("target_anchor_end")
+    start = geometry.get("visible_start") or geometry.get("target_anchor_start")
+    end = geometry.get("visible_end") or geometry.get("target_anchor_end")
     if not _is_point(start) or not _is_point(end):
         return ""
 
@@ -82,23 +82,25 @@ def _render_dimension_line(element: Element) -> str:
 
 def _render_dimension_curve(element: Element) -> str:
     geometry = element.geometry
-    start = geometry.get("target_anchor_start")
-    end = geometry.get("target_anchor_end")
-    control_points = _as_sequence(geometry.get("curve_control_points"))
-    if not _is_point(start) or not _is_point(end) or len(control_points) < 2:
+    start = geometry.get("visible_start") or geometry.get("target_anchor_start")
+    end = geometry.get("visible_end") or geometry.get("target_anchor_end")
+    control_points = _as_sequence(geometry.get("control_points") or geometry.get("curve_control_points"))
+    if not _is_point(start) or not _is_point(end) or not control_points:
         return ""
 
-    first_control, second_control = control_points[0], control_points[1]
-    if not _is_point(first_control) or not _is_point(second_control):
+    first_control = control_points[0]
+    if not _is_point(first_control):
         return ""
 
     color = element.color or "black"
     attrs = _dimension_group_attrs(element, geometry)
+    if len(control_points) >= 2 and _is_point(control_points[1]):
+        command = f"C {_format_point(first_control)} {_format_point(control_points[1])} {_format_point(end)}"
+    else:
+        command = f"Q {_format_point(first_control)} {_format_point(end)}"
+
     path_attrs = {
-        "d": (
-            f"M {_format_point(start)} C "
-            f"{_format_point(first_control)} {_format_point(second_control)} {_format_point(end)}"
-        ),
+        "d": f"M {_format_point(start)} {command}",
         "fill": "none",
         "stroke": color,
         "stroke-width": "2",

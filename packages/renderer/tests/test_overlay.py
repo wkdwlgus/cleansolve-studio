@@ -127,6 +127,45 @@ def test_renderer_renders_dimension_curve_with_control_points():
     assert ">r<" in svg
 
 
+def test_renderer_renders_sot_dimension_curve_shape():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_sot_dimension_curve",
+                type="dimension_curve",
+                color="green",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 150, 120]),
+                bbox=[10, 10, 150, 120],
+                geometry={
+                    "kind": "dimension_curve",
+                    "target_anchor_start": [20, 90],
+                    "target_anchor_end": [140, 90],
+                    "visible_start": [20, 102],
+                    "visible_end": [140, 102],
+                    "control_points": [[80, 138]],
+                    "label": "arc",
+                    "label_anchor": [78, 150],
+                },
+            )
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert 'data-element-id="el_sot_dimension_curve"' in svg
+    assert 'data-target-anchor-start="20,90"' in svg
+    assert 'data-target-anchor-end="140,90"' in svg
+    assert '<path d="M 20,102 Q 80,138 140,102" fill="none" stroke="green"' in svg
+    assert ">arc<" in svg
+
+
 def test_renderer_uses_element_label_when_geometry_label_is_missing():
     spec = CandidateSpec(
         job_id="job_render",
