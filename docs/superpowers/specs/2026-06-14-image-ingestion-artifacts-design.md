@@ -1,7 +1,7 @@
 # M1 Image Ingestion & Artifact Storage 상세 설계
 
 Date: 2026-06-14
-Status: Draft for user review
+Status: Approved for implementation planning
 
 ## 1. 목적
 
@@ -443,7 +443,7 @@ Public methods:
 def create_job(self, job_id: str) -> JobManifest
 def get_job(self, job_id: str) -> JobManifest
 def save_manifest(self, manifest: JobManifest) -> None
-def save_image(self, job_id: str, role: ImageRole, upload: UploadFile) -> tuple[JobManifest, ImageArtifact]
+async def save_image(self, job_id: str, role: ImageRole, upload: UploadFile) -> tuple[JobManifest, ImageArtifact]
 def update_after_run(self, job_id: str, status: str, revision_attempts: int, review_items: list[dict[str, Any]]) -> JobManifest
 ```
 
