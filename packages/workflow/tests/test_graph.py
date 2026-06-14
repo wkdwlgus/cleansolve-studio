@@ -10,6 +10,20 @@ def test_workflow_auto_revises_before_human_review():
     state = run_mock_workflow(job_id="job_workflow")
 
     assert state["status"] == "APPROVED"
+    assert state["status_history"] == [
+        "CREATED",
+        "STYLE_PRESET_LOADED",
+        "SPEC_EXTRACTED",
+        "SPEC_VALIDATING",
+        "RENDERED",
+        "INSPECTING",
+        "CORRECTION_PLANNING",
+        "AUTO_REVISING",
+        "SPEC_REVALIDATING",
+        "RENDERED",
+        "RE_INSPECTING",
+        "APPROVED",
+    ]
     assert state["revision_attempts"] == 1
     assert state["max_revision_attempts"] == 2
     assert state["candidate_spec"].elements[0].needs_review is True
@@ -20,6 +34,13 @@ def test_workflow_auto_revises_before_human_review():
         for item in state["review_items"]
     )
     assert state["correction_plans"][0]["actions"][0]["type"] == "spec_patch"
+    assert state["correction_plans"][0]["issues"][0]["expected"] == [540, 850]
+    assert state["correction_plans"][0]["issues"][0]["actual"] == [520, 470]
+    assert (
+        state["correction_plans"][0]["issues"][0]["correction_action"]
+        == "patch_candidate_spec_geometry"
+    )
+    assert state["correction_plans"][0]["issues"][0]["auto_correctable"] is True
 
 
 def test_workflow_does_not_approve_invalid_candidate_spec():
