@@ -26,18 +26,25 @@ export const primitiveTypeLabels: Record<PrimitiveType, string> = {
 };
 
 export function filterHumanReviewItems(items: ReviewItem[], limit = REVIEW_ITEM_LIMIT): ReviewItem[] {
-  return items.filter((item) => item.requires_human_review === true).slice(0, limit);
+  return items.filter((item) => item.requires_human_review === true && item.resolved !== true).slice(0, limit);
 }
 
 export function getPrimitiveTypeLabel(type: PrimitiveType): string {
   return primitiveTypeLabels[type];
 }
 
+const reviewReasonLabels: Record<string, string> = {
+  'Endpoint needs operator review.': '치수 표시 연결점을 확인해 주세요.',
+  'Human review required.': '사람 확인이 필요한 항목입니다.',
+  target_anchor_missing: '치수 표시 기준점을 확인해 주세요.',
+  endpoint_needs_operator_review: '치수 표시 연결점을 확인해 주세요.'
+};
+
 export function getReviewReasonText(item: ReviewItem): string {
   const reason = item.review_reason?.trim();
 
   if (reason) {
-    return reason;
+    return reviewReasonLabels[reason] ?? `${getPrimitiveTypeLabel(item.type)}를 원본 이미지와 비교해 확인해 주세요.`;
   }
 
   return `${getPrimitiveTypeLabel(item.type)} 검토 사유가 아직 없습니다. 원본 요소를 확인해 주세요.`;

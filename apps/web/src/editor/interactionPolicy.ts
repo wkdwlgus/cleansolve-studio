@@ -1,4 +1,5 @@
 import type { PrimitiveType } from '../types/spec';
+import type { ReviewItem } from '../types/spec';
 
 export const interactionPolicy: Record<PrimitiveType, string[]> = {
   formula_line: ['choose_candidate', 'edit_text', 'move', 'adjust_line_spacing', 'change_color'],
@@ -48,4 +49,12 @@ export const interactionPolicy: Record<PrimitiveType, string[]> = {
 
 export function isInteractionAllowed(type: PrimitiveType, action: string): boolean {
   return interactionPolicy[type].includes(action);
+}
+
+export function isReviewActionAllowed(item: ReviewItem | undefined, action: string): boolean {
+  if (!item || item.requires_human_review !== true || item.resolved === true) {
+    return false;
+  }
+
+  return isInteractionAllowed(item.type, action);
 }

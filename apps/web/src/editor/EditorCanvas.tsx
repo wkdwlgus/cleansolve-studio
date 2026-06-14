@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
+import type { ReviewItem } from '../types/spec';
 import { formatAnchorPatchSummary } from './editorCopy';
-import { isInteractionAllowed } from './interactionPolicy';
+import { isReviewActionAllowed } from './interactionPolicy';
 
 interface Point {
   x: number;
@@ -10,7 +11,6 @@ interface Point {
 
 type AnchorKey = 'start' | 'end';
 
-const MARKER_TYPE = 'freehand_dimension_marker';
 const INITIAL_ANCHORS: Record<AnchorKey, Point> = {
   start: { x: 178, y: 386 },
   end: { x: 542, y: 386 }
@@ -24,10 +24,14 @@ type DragLikeEvent = {
   };
 };
 
-export function EditorCanvas() {
+interface EditorCanvasProps {
+  markerReviewItem?: ReviewItem;
+}
+
+export function EditorCanvas({ markerReviewItem }: EditorCanvasProps) {
   const [anchors, setAnchors] = useState(INITIAL_ANCHORS);
-  const canDragStartAnchor = isInteractionAllowed(MARKER_TYPE, 'drag_target_anchor_start');
-  const canDragEndAnchor = isInteractionAllowed(MARKER_TYPE, 'drag_target_anchor_end');
+  const canDragStartAnchor = isReviewActionAllowed(markerReviewItem, 'drag_target_anchor_start');
+  const canDragEndAnchor = isReviewActionAllowed(markerReviewItem, 'drag_target_anchor_end');
 
   const patchSummary = useMemo(() => formatAnchorPatchSummary(anchors), [anchors]);
 
@@ -132,6 +136,7 @@ export function EditorCanvas() {
       </div>
       <p id="canvas-state-summary" className="canvas-summary">
         {canvasSummary}
+        {!markerReviewItem ? ' 현재 사람 확인이 필요한 치수 표시가 없어 조정 도구는 비활성화되어 있습니다.' : ''}
       </p>
       <div className="anchor-controls" aria-label="키보드용 치수 표시 조정">
         <div>

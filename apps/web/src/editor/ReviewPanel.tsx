@@ -1,5 +1,5 @@
 import type { ReviewItem } from '../types/spec';
-import { filterHumanReviewItems, getPrimitiveTypeLabel, getReviewReasonText } from './reviewHelpers';
+import { REVIEW_ITEM_LIMIT, filterHumanReviewItems, getPrimitiveTypeLabel, getReviewReasonText } from './reviewHelpers';
 
 interface ReviewPanelProps {
   items: ReviewItem[];
@@ -12,7 +12,7 @@ export function ReviewPanel({ items }: ReviewPanelProps) {
     <aside className="review-panel" aria-label="검토 패널">
       <div className="panel-header">
         <h2>사람 검토</h2>
-        <span>{reviewItems.length}/3</span>
+        <span>{reviewItems.length}/{REVIEW_ITEM_LIMIT}</span>
       </div>
       {reviewItems.length === 0 ? (
         <p className="empty-state">사용자 확인이 필요한 항목이 없습니다.</p>

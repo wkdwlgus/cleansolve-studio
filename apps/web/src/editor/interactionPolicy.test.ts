@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { interactionPolicy, isInteractionAllowed } from './interactionPolicy';
+import type { ReviewItem } from '../types/spec';
+import { interactionPolicy, isReviewActionAllowed, isInteractionAllowed } from './interactionPolicy';
 
 describe('interaction policy contracts', () => {
   it('allows freehand dimension marker target anchor drags', () => {
@@ -11,5 +12,19 @@ describe('interaction policy contracts', () => {
     expect(isInteractionAllowed('freehand_dimension_marker', 'drag_target_anchor_start')).toBe(true);
     expect(isInteractionAllowed('freehand_dimension_marker', 'drag_target_anchor_end')).toBe(true);
     expect(isInteractionAllowed('freehand_dimension_marker', 'drag_curve_control_point')).toBe(false);
+  });
+
+  it('allows edits only for unresolved human review items', () => {
+    const item: ReviewItem = {
+      element_id: 'marker-1',
+      type: 'freehand_dimension_marker',
+      requires_human_review: true,
+      resolved: false
+    };
+
+    expect(isReviewActionAllowed(item, 'drag_target_anchor_start')).toBe(true);
+    expect(isReviewActionAllowed({ ...item, requires_human_review: false }, 'drag_target_anchor_start')).toBe(false);
+    expect(isReviewActionAllowed({ ...item, resolved: true }, 'drag_target_anchor_start')).toBe(false);
+    expect(isReviewActionAllowed(item, 'drag_curve_control_point')).toBe(false);
   });
 });

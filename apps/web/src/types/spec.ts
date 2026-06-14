@@ -24,5 +24,6 @@ export interface ReviewItem {
   element_id: string;
   type: PrimitiveType;
   requires_human_review: boolean;
+  resolved?: boolean;
   review_reason?: string;
 }
