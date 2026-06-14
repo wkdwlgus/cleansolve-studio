@@ -1,24 +1,28 @@
 import type { ReviewItem } from '../types/spec';
+import { filterHumanReviewItems, getPrimitiveTypeLabel, getReviewReasonText } from './reviewHelpers';
 
 interface ReviewPanelProps {
   items: ReviewItem[];
 }
 
 export function ReviewPanel({ items }: ReviewPanelProps) {
+  const reviewItems = filterHumanReviewItems(items);
+
   return (
     <aside className="review-panel" aria-label="검토 패널">
       <div className="panel-header">
-        <h2>검토</h2>
-        <span>{items.length}/3</span>
+        <h2>사람 검토</h2>
+        <span>{reviewItems.length}/3</span>
       </div>
-      {items.length === 0 ? (
+      {reviewItems.length === 0 ? (
         <p className="empty-state">사용자 확인이 필요한 항목이 없습니다.</p>
       ) : (
         <ul className="review-list">
-          {items.map((item) => (
+          {reviewItems.map((item) => (
             <li key={item.element_id}>
-              <strong>{item.type}</strong>
-              <span>{item.review_reason}</span>
+              <strong>{getPrimitiveTypeLabel(item.type)}</strong>
+              <span>{getReviewReasonText(item)}</span>
+              <small>요소 ID: {item.element_id}</small>
             </li>
           ))}
         </ul>

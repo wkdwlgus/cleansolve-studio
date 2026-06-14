@@ -9,7 +9,8 @@ export function App() {
           <div>
             <h1>CleanSolve Studio</h1>
             <p>
-              활성 스타일: <strong>default_pretty_handwriting v1</strong>
+              활성 스타일: <strong>정갈한 손글씨</strong>{' '}
+              <span className="technical-detail">default_pretty_handwriting v1</span>
             </p>
           </div>
           <div className="job-summary" aria-label="작업 상태">

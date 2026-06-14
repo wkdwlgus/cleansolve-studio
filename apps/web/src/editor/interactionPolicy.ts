@@ -45,3 +45,7 @@ export const interactionPolicy: Record<PrimitiveType, string[]> = {
   freehand_annotation: ['move', 'scale', 'adjust_opacity', 'redraw'],
   unsupported_annotation: ['view_source_crop', 'keep_original', 'manual_edit']
 };
+
+export function isInteractionAllowed(type: PrimitiveType, action: string): boolean {
+  return interactionPolicy[type].includes(action);
+}

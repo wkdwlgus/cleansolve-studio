@@ -23,5 +23,6 @@ export type PrimitiveType =
 export interface ReviewItem {
   element_id: string;
   type: PrimitiveType;
-  review_reason: string;
+  requires_human_review: boolean;
+  review_reason?: string;
 }
