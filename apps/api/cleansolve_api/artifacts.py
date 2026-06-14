@@ -146,17 +146,22 @@ class LocalArtifactStore:
     def update_after_run(
         self,
         job_id: str,
-        status_value: str,
+        status_value: JobStatus,
         revision_attempts: int,
         review_items: list[dict[str, Any]],
     ) -> JobManifest:
         manifest = self.get_job(job_id)
-        manifest.status = status_value
-        manifest.revision_attempts = revision_attempts
-        manifest.review_items = review_items
-        manifest.updated_at = _utc_now()
-        self.save_manifest(manifest)
-        return manifest
+        updated_manifest = JobManifest.model_validate(
+            {
+                **manifest.model_dump(mode="python"),
+                "status": status_value,
+                "revision_attempts": revision_attempts,
+                "review_items": review_items,
+                "updated_at": _utc_now(),
+            }
+        )
+        self.save_manifest(updated_manifest)
+        return updated_manifest
 
     def _job_root(self, job_id: str) -> Path:
         return self.storage_root / job_id

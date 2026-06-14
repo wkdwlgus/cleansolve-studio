@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
+from cleansolve_api.artifacts import LocalArtifactStore
 from cleansolve_api.main import app
 from cleansolve_api.routes import jobs
 from cleansolve_api.settings import Settings
@@ -68,6 +70,19 @@ def test_create_job_and_run_mock_workflow_after_required_images_uploaded():
     assert run_response.status_code == 200
     assert run_response.json()["status"] == "APPROVED"
     assert run_response.json()["revision_attempts"] == 1
+
+
+def test_run_requires_required_images_with_structured_error():
+    client = TestClient(app)
+
+    job_id = client.post("/jobs").json()["job_id"]
+    response = client.post(f"/jobs/{job_id}/run")
+
+    assert response.status_code == 409
+    assert_error(response, "MISSING_REQUIRED_IMAGES")
+    assert response.json()["detail"]["fields"] == {
+        "missing_roles": ["problem", "teacher_solution"],
+    }
 
 
 def test_review_items_endpoint_hides_internal_needs_review_items():
@@ -151,3 +166,18 @@ def test_settings_load_apps_api_env_file(monkeypatch, tmp_path):
     assert settings.openai_api_key == "sk-from-env-file"
     assert settings.openai_model_analysis == "gpt-analysis-file"
     assert settings.storage_root == Path("var/env-file-jobs")
+
+
+def test_manifest_store_rejects_invalid_workflow_status(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+
+    with pytest.raises(ValidationError):
+        store.update_after_run(
+            job_id=manifest.job_id,
+            status_value="INVALID",
+            revision_attempts=1,
+            review_items=[],
+        )
+
+    assert store.get_job(manifest.job_id).status == "CREATED"
