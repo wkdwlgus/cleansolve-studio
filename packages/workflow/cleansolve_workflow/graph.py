@@ -7,6 +7,7 @@ from .nodes import (
     inspect_render,
     load_style_preset,
     plan_correction,
+    require_revision,
     render_preview,
     validate_spec,
 )
@@ -23,29 +24,69 @@ def build_graph():
     graph.add_node("plan_correction", plan_correction)
     graph.add_node("apply_correction", apply_correction)
     graph.add_node("decide_human_review", decide_human_review)
+    graph.add_node("require_revision", require_revision)
 
     graph.set_entry_point("load_style_preset")
     graph.add_edge("load_style_preset", "analyze_sources")
     graph.add_edge("analyze_sources", "validate_spec")
-    graph.add_edge("validate_spec", "render_preview")
+    graph.add_conditional_edges(
+        "validate_spec",
+        _route_after_validation,
+        {
+            "render_preview": "render_preview",
+            "require_revision": "require_revision",
+        },
+    )
     graph.add_edge("render_preview", "inspect_render")
-    graph.add_edge("inspect_render", "plan_correction")
+    graph.add_conditional_edges(
+        "inspect_render",
+        _route_after_inspection,
+        {
+            "plan_correction": "plan_correction",
+            "decide_human_review": "decide_human_review",
+            "require_revision": "require_revision",
+        },
+    )
     graph.add_edge("plan_correction", "apply_correction")
-    graph.add_edge("apply_correction", "decide_human_review")
+    graph.add_edge("apply_correction", "validate_spec")
     graph.add_edge("decide_human_review", END)
+    graph.add_edge("require_revision", END)
     return graph.compile()
 
 
-def run_mock_workflow(job_id: str) -> WorkflowState:
+def run_mock_workflow(
+    job_id: str,
+    *,
+    max_revision_attempts: int = 2,
+    candidate_spec_override=None,
+) -> WorkflowState:
     app = build_graph()
-    return app.invoke(
-        {
-            "job_id": job_id,
-            "status": "CREATED",
-            "validation_reports": [],
-            "correction_plans": [],
-            "revision_attempts": 0,
-            "max_revision_attempts": 2,
-            "review_items": [],
-        }
-    )
+    initial_state = {
+        "job_id": job_id,
+        "status": "CREATED",
+        "status_history": ["CREATED"],
+        "validation_reports": [],
+        "correction_plans": [],
+        "revision_attempts": 0,
+        "max_revision_attempts": max_revision_attempts,
+        "review_items": [],
+        "inspection_issue": None,
+    }
+    if candidate_spec_override is not None:
+        initial_state["candidate_spec"] = candidate_spec_override
+
+    return app.invoke(initial_state)
+
+
+def _route_after_validation(state: WorkflowState) -> str:
+    if state["validation_reports"][-1].passed:
+        return "render_preview"
+    return "require_revision"
+
+
+def _route_after_inspection(state: WorkflowState) -> str:
+    if state.get("inspection_issue") is None:
+        return "decide_human_review"
+    if state.get("revision_attempts", 0) >= state.get("max_revision_attempts", 2):
+        return "require_revision"
+    return "plan_correction"

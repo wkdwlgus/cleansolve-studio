@@ -1,3 +1,8 @@
+from copy import deepcopy
+
+from cleansolve_ai.mock_client import MockAnalysisClient
+from cleansolve_spec.models import Element, Evidence
+
 from cleansolve_workflow.graph import run_mock_workflow
 
 
@@ -7,5 +12,83 @@ def test_workflow_auto_revises_before_human_review():
     assert state["status"] == "APPROVED"
     assert state["revision_attempts"] == 1
     assert state["max_revision_attempts"] == 2
+    assert state["candidate_spec"].elements[0].needs_review is True
+    assert state["candidate_spec"].elements[0].requires_human_review is False
     assert state["review_items"] == []
+    assert all(
+        not item["element_id"].startswith("el_freehand_dimension")
+        for item in state["review_items"]
+    )
     assert state["correction_plans"][0]["actions"][0]["type"] == "spec_patch"
+
+
+def test_workflow_does_not_approve_invalid_candidate_spec():
+    candidate_spec = MockAnalysisClient().extract_candidate_spec("job_invalid")
+    candidate_spec.elements = [
+        Element(
+            id="el_invalid_dimension",
+            type="dimension_curve",
+            color="red",
+            confidence=0.85,
+            needs_review=True,
+            requires_human_review=False,
+            auto_correctable=False,
+            evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 100, 100]),
+            bbox=[10, 10, 100, 100],
+            geometry={"kind": "dimension_curve", "label": "1", "label_anchor": [50, 50]},
+        )
+    ]
+
+    state = run_mock_workflow(
+        job_id="job_invalid",
+        candidate_spec_override=candidate_spec,
+    )
+
+    assert state["status"] == "REVISION_REQUIRED"
+    assert state["validation_reports"][0].passed is False
+    assert state["validation_reports"][0].issues[0].type == "missing_dimension_target_anchor"
+
+
+def test_workflow_enforces_zero_revision_budget():
+    state = run_mock_workflow(job_id="job_no_revision", max_revision_attempts=0)
+
+    assert state["status"] == "REVISION_REQUIRED"
+    assert state["revision_attempts"] == 0
+    assert state["correction_plans"] == []
+    assert state["candidate_spec"].elements[0].revision_history == []
+
+
+def test_workflow_revalidates_after_auto_revision_before_approval():
+    state = run_mock_workflow(job_id="job_revalidate")
+
+    assert state["status"] == "APPROVED"
+    assert len(state["validation_reports"]) >= 2
+    assert state["validation_reports"][-1].passed is True
+    assert state["inspection_issue"] is None
+    assert state["status_history"][-4:] == [
+        "SPEC_REVALIDATING",
+        "RENDERED",
+        "RE_INSPECTING",
+        "APPROVED",
+    ]
+
+
+def test_workflow_auto_correction_changes_candidate_spec_geometry():
+    original_spec = MockAnalysisClient().extract_candidate_spec("job_patch")
+    original_anchor = deepcopy(original_spec.elements[0].geometry["label_anchor"])
+
+    state = run_mock_workflow(
+        job_id="job_patch",
+        candidate_spec_override=original_spec,
+    )
+    element = state["candidate_spec"].elements[0]
+
+    assert element.geometry["label_anchor"] != original_anchor
+    assert element.geometry["label_anchor"] == [300, 620]
+    assert element.revision_history == [
+        {
+            "revision_id": "rev_001",
+            "source": "auto_correction",
+            "patch": {"geometry.label_anchor": [300, 620]},
+        }
+    ]

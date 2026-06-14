@@ -12,4 +12,5 @@ class WorkflowState(TypedDict, total=False):
     review_items: list[dict[str, str]]
     rendered_preview: str
     style_preset: dict[str, str]
-    inspection_issue: dict[str, Any]
+    inspection_issue: dict[str, Any] | None
+    status_history: list[str]
