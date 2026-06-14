@@ -1,0 +1,265 @@
+:root {
+  color: #172033;
+  background: #eef2f6;
+  font-family: Inter, "Apple SD Gothic Neo", "Noto Sans KR", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  color: #172033;
+  background: #eef2f6;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.workspace {
+  min-width: 0;
+  padding: 24px;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.topbar h1 {
+  margin: 0 0 6px;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.topbar p {
+  margin: 0;
+  color: #5b677a;
+  font-size: 14px;
+}
+
+.topbar strong {
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.technical-detail {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.job-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  color: #25324a;
+  font-size: 13px;
+}
+
+.job-summary span {
+  border: 1px solid #c7d2de;
+  background: #ffffff;
+  border-radius: 999px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.canvas-shell {
+  width: min(100%, 760px);
+  display: grid;
+  gap: 12px;
+}
+
+.canvas-frame {
+  width: 100%;
+  height: 540px;
+  background: #ffffff;
+  border: 1px solid #c7d2de;
+  border-radius: 8px;
+  overflow: auto;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.canvas-summary {
+  margin: 0;
+  color: #25324a;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.anchor-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.anchor-controls > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.anchor-controls h2 {
+  flex-basis: 100%;
+  margin: 0;
+  color: #25324a;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.anchor-controls button {
+  min-width: 64px;
+  border: 1px solid #94a3b8;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #172033;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.anchor-controls button:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.35);
+  outline-offset: 2px;
+}
+
+.anchor-controls button:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.patch-preview {
+  max-width: 100%;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  background: #172033;
+  color: #e2e8f0;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.review-panel {
+  border-left: 1px solid #c7d2de;
+  background: #ffffff;
+  padding: 24px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.panel-header span {
+  color: #0f766e;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.empty-state {
+  margin: 0;
+  color: #5b677a;
+  line-height: 1.55;
+}
+
+.review-list {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.review-list li {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.review-list strong {
+  color: #25324a;
+  font-size: 13px;
+}
+
+.review-list span {
+  color: #5b677a;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.review-list small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+@media (max-width: 880px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .review-panel {
+    border-left: 0;
+    border-top: 1px solid #c7d2de;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace,
+  .review-panel {
+    padding: 16px;
+  }
+
+  .topbar {
+    display: grid;
+  }
+
+  .job-summary {
+    justify-content: flex-start;
+  }
+
+  .canvas-frame {
+    height: 360px;
+  }
+
+  .anchor-controls {
+    grid-template-columns: 1fr;
+  }
+}

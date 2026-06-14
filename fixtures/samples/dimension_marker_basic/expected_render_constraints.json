@@ -1,0 +1,8 @@
+{
+  "must_include": [
+    "data-element-id=\"el_freehand_dimension_001\"",
+    "data-target-anchor-start=\"180,820\"",
+    "data-target-anchor-end=\"520,470\"",
+    "data-stroke-continuity=\"fragmented\""
+  ]
+}

@@ -242,6 +242,9 @@ Expected variable:
 
 ```text
 OPENAI_API_KEY=sk-...
+OPENAI_MODEL_ANALYSIS=
+OPENAI_MODEL_VALIDATION=
+OPENAI_MODEL_IMAGE=
 ```
 
 The repository should include a committed example file:
@@ -256,6 +259,7 @@ with:
 OPENAI_API_KEY=
 OPENAI_MODEL_ANALYSIS=
 OPENAI_MODEL_VALIDATION=
+OPENAI_MODEL_IMAGE=
 ```
 
 The backend settings module reads `apps/api/.env` during local development. CI and deployment should provide the same variables through environment secrets. The scaffold must add `.env` files to `.gitignore`.

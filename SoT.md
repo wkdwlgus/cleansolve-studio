@@ -1,8 +1,8 @@
 # CleanSolve Studio — Source of Truth
 
-> CleanSolve Studio의 초기 Source of Truth(SoT) 문서이다.  
-> Codex CLI + GPT-5.5 + Superpowers 기반 프로젝트 세팅 시 제품 원칙, 워크플로우, 검증/수정 루프, HITL 정책의 기준으로 사용한다.  
-> 원본 문제 이미지와 선생님 손풀이 이미지를 최상위 기준으로 두고, 시스템 내장 손글씨 스타일 프리셋을 활용해 정서된 풀이 이미지를 생성하는 방향을 정의한다.  
+> CleanSolve Studio의 초기 Source of Truth(SoT) 문서이다.
+> Codex CLI + GPT-5.5 + Superpowers 기반 프로젝트 세팅 시 제품 원칙, 워크플로우, 검증/수정 루프, HITL 정책의 기준으로 사용한다.
+> 원본 문제 이미지와 선생님 손풀이 이미지를 최상위 기준으로 두고, 시스템 내장 손글씨 스타일 프리셋을 활용해 정서된 풀이 이미지를 생성하는 방향을 정의한다.
 > 이 문서는 구현 세부를 고정하기보다, Superpowers가 스캐폴딩과 기술 선택을 할 때 깨지면 안 되는 제품/품질 경계를 명시한다.
 
 ## 목차

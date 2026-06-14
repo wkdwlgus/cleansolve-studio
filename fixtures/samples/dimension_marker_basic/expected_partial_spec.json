@@ -1,0 +1,92 @@
+{
+  "job_id": "fixture_dimension_marker_basic",
+  "version": 1,
+  "source_images": {
+    "problem_image_id": "fixture_dimension_marker_basic_problem",
+    "teacher_solution_image_id": "fixture_dimension_marker_basic_teacher_solution"
+  },
+  "style": {
+    "source": "system_builtin",
+    "preset_id": "default_pretty_handwriting",
+    "preset_version": "v1",
+    "description": "Default operator-managed handwriting style preset."
+  },
+  "page": {
+    "width": 1080,
+    "height": 1920
+  },
+  "regions": [
+    {
+      "id": "region_diagram",
+      "type": "diagram",
+      "bbox": [120, 420, 960, 980],
+      "preserve_original": true
+    },
+    {
+      "id": "region_solution",
+      "type": "solution_area",
+      "bbox": [80, 1080, 1000, 1800],
+      "preserve_original": false
+    }
+  ],
+  "elements": [
+    {
+      "id": "el_freehand_dimension_001",
+      "type": "freehand_dimension_marker",
+      "source_region": null,
+      "color": "red",
+      "confidence": 0.82,
+      "needs_review": true,
+      "requires_human_review": false,
+      "auto_correctable": true,
+      "evidence": {
+        "source": "teacher_solution_image",
+        "bbox": [160, 430, 540, 850]
+      },
+      "bbox": [160, 430, 540, 850],
+      "geometry": {
+        "kind": "freehand_dimension_marker",
+        "target_anchor_start": [180, 820],
+        "target_anchor_end": [520, 470],
+        "visible_strokes": [
+          {
+            "stroke_id": "s1",
+            "points": [[190, 805], [210, 720], [250, 650]]
+          },
+          {
+            "stroke_id": "s2",
+            "points": [[305, 580], [370, 510], [500, 455]]
+          }
+        ],
+        "label": "1",
+        "label_anchor": [280, 610],
+        "offset_side": "left",
+        "stroke_continuity": "fragmented"
+      },
+      "style": {},
+      "interaction": {
+        "allowed": [
+          "drag_target_anchor_start",
+          "drag_target_anchor_end",
+          "drag_visible_stroke",
+          "drag_label"
+        ]
+      },
+      "validation": {},
+      "revision_history": [],
+      "text": null,
+      "display_text": null,
+      "label": null,
+      "review_reason": null
+    }
+  ],
+  "uncertainties": [
+    {
+      "id": "unc_001",
+      "element_id": "el_freehand_dimension_001",
+      "type": "dimension_endpoint_uncertain",
+      "review_ui": "drag_dimension_endpoint",
+      "user_visible_by_default": false
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "revision_id": "rev_001",
+  "source_preview_id": "rendered_preview_v1",
+  "issues": [
+    {
+      "issue_id": "issue_auto_001",
+      "type": "dimension_endpoint_mismatch",
+      "severity": "high",
+      "expected": "freehand dimension marker should represent target range from O to S",
+      "actual": "visible marker appears to cover only partial range",
+      "auto_correctable": true,
+      "correction_action": "patch_candidate_spec_geometry"
+    }
+  ],
+  "actions": [
+    {
+      "action_id": "act_001",
+      "type": "spec_patch",
+      "element_id": "el_freehand_dimension_001",
+      "patch": {
+        "geometry.target_anchor_end": [520, 470]
+      }
+    }
+  ],
+  "requires_human_review": false
+}
