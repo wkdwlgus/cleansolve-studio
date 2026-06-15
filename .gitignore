@@ -17,3 +17,5 @@ var/
 !.env.example
 apps/api/.env
 apps/web/.env
+/image/
+/.superpowers/
