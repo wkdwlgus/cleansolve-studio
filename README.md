@@ -65,6 +65,15 @@ CLEANSOLVE_STORAGE_ROOT=var/jobs
 
 `.env` 파일은 커밋하지 않습니다. CI나 배포 환경에서는 환경 변수 또는 secret store를 사용합니다.
 
+## 로컬 이미지 업로드 흐름
+
+1. `POST /jobs`로 job을 만듭니다.
+2. `POST /jobs/{job_id}/images/problem`에 multipart field `file`로 원본 문제 이미지를 업로드합니다.
+3. `POST /jobs/{job_id}/images/teacher-solution`에 multipart field `file`로 선생님 손풀이 이미지를 업로드합니다.
+4. 두 이미지가 모두 업로드된 뒤 `POST /jobs/{job_id}/run`을 호출합니다.
+
+업로드된 원본 이미지는 job artifact로 저장되며 같은 role을 다시 업로드해도 기존 artifact를 덮어쓰지 않습니다. API 응답에는 local absolute path와 원본 파일명을 노출하지 않습니다.
+
 ## 로컬 검증
 
 Python 테스트:
