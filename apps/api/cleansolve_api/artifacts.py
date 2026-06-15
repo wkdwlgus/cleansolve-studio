@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -19,6 +20,7 @@ JobStatus = Literal["CREATED", "APPROVED", "NEEDS_REVIEW", "FAILED"]
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg"}
 MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
+JOB_ID_PATTERN = re.compile(r"^job_[0-9a-f]{32}$")
 
 ERROR_MESSAGES = {
     "JOB_NOT_FOUND": "작업을 찾을 수 없습니다.",
@@ -88,6 +90,11 @@ def job_not_found_error(job_id: str) -> HTTPException:
     return _error("JOB_NOT_FOUND", status.HTTP_404_NOT_FOUND, {"job_id": job_id})
 
 
+def _validate_job_id(job_id: str) -> None:
+    if not JOB_ID_PATTERN.fullmatch(job_id):
+        raise job_not_found_error(job_id)
+
+
 def missing_required_images_error(missing_roles: list[ImageRole]) -> HTTPException:
     return _error(
         "MISSING_REQUIRED_IMAGES",
@@ -119,6 +126,7 @@ class LocalArtifactStore:
 
     def create_job(self, job_id: str | None = None) -> JobManifest:
         resolved_job_id = job_id or _new_job_id()
+        _validate_job_id(resolved_job_id)
         now = _utc_now()
         manifest = JobManifest(
             job_id=resolved_job_id,
@@ -134,12 +142,14 @@ class LocalArtifactStore:
         return manifest
 
     def get_job(self, job_id: str) -> JobManifest:
+        _validate_job_id(job_id)
         manifest_path = self._manifest_path(job_id)
         if not manifest_path.exists():
             raise job_not_found_error(job_id)
         return JobManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
 
     def save_manifest(self, manifest: JobManifest) -> None:
+        _validate_job_id(manifest.job_id)
         job_root = self._job_root(manifest.job_id)
         try:
             job_root.mkdir(parents=True, exist_ok=True)
@@ -163,6 +173,7 @@ class LocalArtifactStore:
         revision_attempts: int,
         review_items: list[dict[str, Any]],
     ) -> JobManifest:
+        _validate_job_id(job_id)
         with self._job_lock(job_id):
             manifest = self.get_job(job_id)
             updated_manifest = JobManifest.model_validate(
@@ -186,6 +197,7 @@ class LocalArtifactStore:
         temp_path: Path | None = None
 
         try:
+            _validate_job_id(job_id)
             manifest = self.get_job(job_id)
             content_type = upload.content_type
             if content_type not in ALLOWED_IMAGE_MIME_TYPES:

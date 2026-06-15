@@ -25,7 +25,7 @@
 | Deterministic renderer | Partial | dimension line, dimension curve, freehand dimension marker SVG overlay 지원 |
 | Mock AI adapter | Done | fixture 기반 candidate spec 생성 경로가 있음 |
 | Workflow orchestrator | Partial | LangGraph self-revision prototype이 있으나 실제 image ingestion/artifact 상태와는 아직 느슨함 |
-| FastAPI job API | Partial | job 생성, run, review item shell은 있으나 이미지 upload/artifact 저장이 없음 |
+| FastAPI job API | Partial | job 생성, 이미지 upload/artifact 저장, run precondition, review item shell이 있음 |
 | Web editor shell | Partial | API-backed job load, sample canvas, review panel, policy-gated edits 기반은 있음 |
 | HITL policy | Partial | `requires_human_review=true` 필터와 review budget은 구현됨 |
 | Spec patch 저장 | Not Started | 사용자의 수정사항을 server-side patch로 저장하는 API가 없음 |
@@ -272,7 +272,7 @@
 
 | # | SoT 성공 기준 | 현재 상태 | 연결 milestone |
 | --- | --- | --- | --- |
-| 1 | 원본 문제 이미지와 손풀이 이미지 업로드 | Not Started | M1 |
+| 1 | 원본 문제 이미지와 손풀이 이미지 업로드 | Done | M1 |
 | 2 | 기본 내장 손글씨 스타일 프리셋 로드 | Done | M0 |
 | 3 | candidate spec 생성 또는 mock spec 처리 | Partial | M2 |
 | 4 | candidate spec 기반 overlay preview | Partial | M3 |
@@ -320,10 +320,10 @@
 
 ## 다음 추천 작업
 
-다음 구현 작업은 `M1. Image Ingestion & Artifact Storage`가 가장 적합하다.
+다음 구현 작업은 `M2. Candidate Spec Pipeline`이 가장 적합하다.
 
 이유:
 
-- SoT의 첫 번째 MVP 성공 기준이다.
-- 원본 이미지를 최상위 Source of Truth로 다루는 제품 원칙을 코드로 고정한다.
-- 이후 candidate spec, OpenAI adapter, web upload flow, export가 모두 image artifact를 입력으로 사용한다.
+- M1에서 저장한 source image artifact를 다음 pipeline 입력으로 연결해야 한다.
+- candidate spec, validation report, correction input을 artifact로 저장해야 이후 preview, HITL, export 흐름을 붙일 수 있다.
+- 실제 OpenAI adapter 없이도 mock 기반 E2E 경로를 먼저 안정화할 수 있다.

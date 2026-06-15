@@ -107,6 +107,74 @@ def test_get_unknown_job_returns_structured_404():
     assert response.json()["detail"]["fields"] == {"job_id": "job_unknown"}
 
 
+def test_get_rejects_encoded_path_traversal_job_id(monkeypatch, tmp_path):
+    storage_root = tmp_path / "jobs"
+    storage_root.mkdir()
+    monkeypatch.setattr(jobs.settings, "storage_root", storage_root)
+    parent_manifest = tmp_path / "manifest.json"
+    parent_manifest.write_text(
+        """
+{
+  "job_id": "job_00000000000000000000000000000000",
+  "status": "CREATED",
+  "created_at": "2026-06-15T00:00:00Z",
+  "updated_at": "2026-06-15T00:00:00Z",
+  "revision_attempts": 0,
+  "review_items": [],
+  "image_artifacts": {
+    "problem": [],
+    "teacher_solution": []
+  },
+  "latest_image_artifact_ids": {
+    "problem": null,
+    "teacher_solution": null
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+
+    response = client.get("/jobs/%2e%2e")
+
+    assert response.status_code == 404
+    assert_error(response, "JOB_NOT_FOUND")
+
+
+def test_run_rejects_encoded_path_traversal_job_id(monkeypatch, tmp_path):
+    storage_root = tmp_path / "jobs"
+    storage_root.mkdir()
+    monkeypatch.setattr(jobs.settings, "storage_root", storage_root)
+    parent_manifest = tmp_path / "manifest.json"
+    parent_manifest.write_text(
+        """
+{
+  "job_id": "job_00000000000000000000000000000000",
+  "status": "CREATED",
+  "created_at": "2026-06-15T00:00:00Z",
+  "updated_at": "2026-06-15T00:00:00Z",
+  "revision_attempts": 0,
+  "review_items": [],
+  "image_artifacts": {
+    "problem": [],
+    "teacher_solution": []
+  },
+  "latest_image_artifact_ids": {
+    "problem": null,
+    "teacher_solution": null
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    client = TestClient(app)
+
+    response = client.post("/jobs/%2e%2e/run")
+
+    assert response.status_code == 404
+    assert_error(response, "JOB_NOT_FOUND")
+
+
 def test_run_unknown_job_returns_structured_404():
     client = TestClient(app)
 
