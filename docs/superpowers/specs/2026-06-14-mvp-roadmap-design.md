@@ -83,4 +83,3 @@ Reasoning:
 - It includes current state, milestones, acceptance criteria, optional user inputs, SoT success criteria mapping, and recommended next PR order.
 - The next implementation milestone is explicit.
 - No implementation code is changed by this documentation task.
-
