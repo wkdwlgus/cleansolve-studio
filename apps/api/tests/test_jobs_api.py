@@ -339,6 +339,14 @@ def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
         assert artifact.source_image_artifact_ids == source_ids
 
 
+def test_read_latest_analysis_payload_rejects_invalid_internal_artifact_type(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+
+    with pytest.raises(ValueError):
+        store.read_latest_analysis_payload(manifest.job_id, "unknown_type")
+
+
 def test_analysis_artifact_routes_return_structured_404_before_run():
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]

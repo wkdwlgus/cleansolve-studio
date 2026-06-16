@@ -320,6 +320,9 @@ class LocalArtifactStore:
         job_id: str,
         artifact_type: AnalysisArtifactType,
     ) -> dict[str, Any]:
+        if artifact_type not in ANALYSIS_ARTIFACT_TYPES:
+            raise ValueError(f"Unsupported analysis artifact type: {artifact_type}")
+
         manifest = self.get_job(job_id)
         artifact_id = manifest.latest_analysis_artifact_ids[artifact_type]
         if artifact_id is None:
