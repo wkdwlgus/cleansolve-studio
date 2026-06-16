@@ -43,6 +43,21 @@ def test_workflow_auto_revises_before_human_review():
     assert state["correction_plans"][0]["issues"][0]["auto_correctable"] is True
 
 
+def test_mock_workflow_passes_source_image_artifact_ids_to_candidate_spec():
+    state = run_mock_workflow(
+        "job_abc",
+        source_image_artifact_ids={
+            "problem": "img_problem_123",
+            "teacher_solution": "img_teacher_456",
+        },
+    )
+
+    assert state["candidate_spec"].source_images == {
+        "problem_image_id": "img_problem_123",
+        "teacher_solution_image_id": "img_teacher_456",
+    }
+
+
 def test_workflow_does_not_approve_invalid_candidate_spec():
     candidate_spec = MockAnalysisClient().extract_candidate_spec("job_invalid")
     candidate_spec.elements = [

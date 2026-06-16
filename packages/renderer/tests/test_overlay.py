@@ -8,6 +8,385 @@ def assert_xml_parseable(svg: str):
     ElementTree.fromstring(svg)
 
 
+def parse_svg(svg: str):
+    return ElementTree.fromstring(svg)
+
+
+def find_children(element, tag_name: str):
+    return [child for child in element.iter() if child.tag.endswith(f"}}{tag_name}")]
+
+
+def test_renderer_preserves_source_image_metadata():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "problem_v1", "teacher_solution_image_id": "solution_v1"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert 'data-problem-image-id="problem_v1"' in svg
+    assert 'data-teacher-solution-image-id="solution_v1"' in svg
+
+
+def test_renderer_renders_formula_line_and_text_note():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_formula",
+                type="formula_line",
+                color="navy",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 100, 40]),
+                bbox=[10, 10, 100, 40],
+                geometry={"anchor": [30, 40]},
+                style={"font_size": 20},
+                display_text="x < y",
+            ),
+            Element(
+                id="el_note",
+                type="text_note",
+                confidence=0.8,
+                evidence=Evidence(source="teacher_solution_image", bbox=[40, 50, 120, 40]),
+                bbox=[40, 50, 120, 40],
+                geometry={"anchor": [50, 70], "text": "check & solve"},
+            ),
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert 'data-primitive-type="formula_line"' in svg
+    assert (
+        '<text x="30" y="40" fill="navy" font-family="serif" '
+        'font-size="20" data-text-kind="formula_line">x &lt; y</text>'
+    ) in svg
+    assert 'data-primitive-type="text_note"' in svg
+    assert 'font-family="sans-serif"' in svg
+    assert ">check &amp; solve<" in svg
+
+
+def test_renderer_renders_highlights_and_arrow():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_highlight_line",
+                type="highlight_line",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 20, 100, 10]),
+                bbox=[10, 20, 100, 10],
+                geometry={"start": [10, 20], "end": [110, 20]},
+            ),
+            Element(
+                id="el_highlight_curve",
+                type="highlight_curve",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[20, 40, 100, 50]),
+                bbox=[20, 40, 100, 50],
+                geometry={"start": [20, 80], "end": [120, 80], "control_points": [[70, 40]]},
+            ),
+            Element(
+                id="el_arrow",
+                type="arrow",
+                color="purple",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[15, 15, 75, 30]),
+                bbox=[15, 15, 75, 30],
+                geometry={"start": [15, 15], "end": [90, 45]},
+            ),
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert '<defs><marker id="cleansolve-arrowhead"' in svg
+    assert (
+        '<line x1="10" y1="20" x2="110" y2="20" stroke="#ffd84d" '
+        'stroke-width="8" stroke-linecap="round" opacity="0.35"'
+    ) in svg
+    assert '<path d="M 20,80 Q 70,40 120,80" fill="none" stroke="#ffd84d"' in svg
+    assert 'marker-end="url(#cleansolve-arrowhead)"' in svg
+    assert '<line x1="15" y1="15" x2="90" y2="45" stroke="purple"' in svg
+
+    root = parse_svg(svg)
+    defs = find_children(root, "defs")
+    markers = find_children(root, "marker")
+    marker_paths = find_children(root, "path")
+    arrow_lines = [
+        line
+        for line in find_children(root, "line")
+        if line.attrib.get("marker-end") == "url(#cleansolve-arrowhead)"
+    ]
+    assert len(defs) == 1
+    assert len(markers) == 1
+    assert markers[0].attrib["id"] == "cleansolve-arrowhead"
+    assert any(path.attrib.get("d") == "M 0 0 L 10 5 L 0 10 z" and path.attrib.get("fill") == "black" for path in marker_paths)
+    assert len(arrow_lines) == 1
+
+
+def test_renderer_renders_box_circle_point_and_segment_labels():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_box",
+                type="box",
+                color="red",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[20, 30, 100, 50]),
+                bbox=[20, 30, 100, 50],
+            ),
+            Element(
+                id="el_circle",
+                type="circle",
+                color="green",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[100, 120, 40, 60]),
+                bbox=[100, 120, 40, 60],
+            ),
+            Element(
+                id="el_point",
+                type="point_label",
+                color="blue",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 20, 30, 20]),
+                bbox=[10, 20, 30, 20],
+                geometry={"point": [15, 25]},
+                label="A",
+            ),
+            Element(
+                id="el_segment",
+                type="segment_label",
+                color="black",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[30, 80, 100, 20]),
+                bbox=[30, 80, 100, 20],
+                geometry={"start": [30, 90], "end": [130, 90]},
+                label="BC",
+            ),
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert '<rect x="20" y="30" width="100" height="50" fill="none" stroke="red"' in svg
+    assert '<circle cx="120" cy="150" r="20" fill="none" stroke="green"' in svg
+    assert '<circle cx="15" cy="25" r="3" fill="blue" />' in svg
+    assert '<text x="23" y="17" fill="blue" font-family="sans-serif" font-size="14">A</text>' in svg
+    assert '<text x="80" y="90" fill="black" font-family="sans-serif" font-size="14">BC</text>' in svg
+
+
+def test_renderer_skips_malformed_and_unsupported_primitives_without_crashing():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_bad_formula",
+                type="formula_line",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 100, 40]),
+                bbox=[10, 10, 100, 40],
+                text="missing anchor",
+            ),
+            Element(
+                id="el_bad_curve",
+                type="highlight_curve",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[20, 40, 100, 50]),
+                bbox=[20, 40, 100, 50],
+                geometry={"start": [20, 80], "end": [120, 80], "control_points": [["bad", 40]]},
+            ),
+            Element(
+                id="el_angle",
+                type="angle_mark",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[20, 40, 100, 50]),
+                bbox=[20, 40, 100, 50],
+            ),
+        ],
+    )
+
+    try:
+        svg = render_overlay_svg(spec)
+    except Exception as exc:
+        raise AssertionError("renderer should skip malformed primitives without raising") from exc
+
+    assert_xml_parseable(svg)
+    assert "el_bad_formula" not in svg
+    assert "el_bad_curve" not in svg
+    assert "el_angle" not in svg
+    assert "<defs>" not in svg
+
+
+def test_renderer_treats_empty_high_priority_text_as_skip():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_empty_formula",
+                type="formula_line",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 100, 40]),
+                bbox=[10, 10, 100, 40],
+                geometry={"anchor": [30, 40]},
+                display_text="",
+                text="fallback must not render",
+            ),
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert "el_empty_formula" not in svg
+    assert "fallback must not render" not in svg
+
+
+def test_renderer_accepts_zero_opacity_highlights():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_hidden_highlight",
+                type="highlight_line",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 20, 100, 10]),
+                bbox=[10, 20, 100, 10],
+                geometry={"start": [10, 20], "end": [110, 20]},
+                style={"opacity": 0},
+            ),
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert 'data-element-id="el_hidden_highlight"' in svg
+    assert 'opacity="0"' in svg
+    assert 'opacity="0.35"' not in svg
+
+
+def test_renderer_sanitizes_xml_illegal_control_characters():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "problem\x00id", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el\x00formula",
+                type="formula_line",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 100, 40]),
+                bbox=[10, 10, 100, 40],
+                geometry={"anchor": [30, 40]},
+                display_text="bad\x00text",
+            ),
+            Element(
+                id="el_marker",
+                type="freehand_dimension_marker",
+                confidence=0.8,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 120, 100]),
+                bbox=[10, 10, 120, 100],
+                geometry={
+                    "visible_strokes": [{"stroke_id": "stroke\x001", "points": [[25, 75], [45, 60]]}],
+                    "label": "label\x00value",
+                    "label_anchor": [65, 50],
+                },
+            ),
+        ],
+    )
+
+    root = parse_svg(render_overlay_svg(spec))
+
+    assert root.attrib["data-problem-image-id"] == "problem\ufffdid"
+    assert any(group.attrib.get("data-element-id") == "el\ufffdformula" for group in find_children(root, "g"))
+    assert any(text.text == "bad\ufffdtext" for text in find_children(root, "text"))
+    assert any(polyline.attrib.get("data-stroke-id") == "stroke\ufffd1" for polyline in find_children(root, "polyline"))
+    assert any(text.text == "label\ufffdvalue" for text in find_children(root, "text"))
+
+
+def test_renderer_rejects_boolean_geometry_and_style_values():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_bool_point",
+                type="highlight_line",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 20, 100, 10]),
+                bbox=[10, 20, 100, 10],
+                geometry={"start": [True, 20], "end": [110, 20]},
+            ),
+            Element(
+                id="el_bool_bbox",
+                type="box",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 20, 100, 10]),
+                bbox=[10, 20, 100, 0],
+                geometry={"bbox": [10, 20, 100, True]},
+            ),
+            Element(
+                id="el_bool_style",
+                type="highlight_line",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 40, 100, 10]),
+                bbox=[10, 40, 100, 10],
+                geometry={"start": [10, 40], "end": [110, 40]},
+                style={"stroke_width": True, "opacity": False},
+            ),
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert "el_bool_point" not in svg
+    assert "el_bool_bbox" not in svg
+    assert 'data-element-id="el_bool_style"' in svg
+    assert 'stroke-width="8"' in svg
+    assert 'opacity="0.35"' in svg
+    assert 'stroke-width="1"' not in svg
+    assert 'opacity="0"' not in svg
+
+
 def test_renderer_preserves_dimension_target_and_visible_strokes():
     spec = CandidateSpec(
         job_id="job_render",

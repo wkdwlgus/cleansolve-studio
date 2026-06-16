@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -249,3 +250,190 @@ def test_manifest_store_rejects_invalid_workflow_status(tmp_path):
         )
 
     assert store.get_job(manifest.job_id).status == "CREATED"
+
+
+def test_old_manifest_json_defaults_analysis_artifact_fields(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    job_id = "job_00000000000000000000000000000000"
+    job_root = tmp_path / "jobs" / job_id
+    job_root.mkdir(parents=True)
+    (job_root / "manifest.json").write_text(
+        """
+{
+  "job_id": "job_00000000000000000000000000000000",
+  "status": "CREATED",
+  "created_at": "2026-06-16T00:00:00Z",
+  "updated_at": "2026-06-16T00:00:00Z",
+  "revision_attempts": 0,
+  "review_items": [],
+  "image_artifacts": {
+    "problem": [],
+    "teacher_solution": []
+  },
+  "latest_image_artifact_ids": {
+    "problem": null,
+    "teacher_solution": null
+  }
+}
+""",
+        encoding="utf-8",
+    )
+
+    manifest = store.get_job(job_id)
+
+    assert manifest.analysis_artifacts == {
+        "candidate_spec": [],
+        "validation_report": [],
+        "correction_plan": [],
+    }
+    assert manifest.latest_analysis_artifact_ids == {
+        "candidate_spec": None,
+        "validation_report": None,
+        "correction_plan": None,
+    }
+
+
+def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    source_ids = {
+        "problem": "img_problem_123",
+        "teacher_solution": "img_teacher_456",
+    }
+    manifest.latest_image_artifact_ids = source_ids
+    store.save_manifest(manifest)
+
+    updated = store.save_analysis_outputs(
+        job_id=manifest.job_id,
+        status_value="APPROVED",
+        revision_attempts=1,
+        review_items=[],
+        candidate_spec_payload={
+            "job_id": manifest.job_id,
+            "version": 1,
+            "source_images": {
+                "problem_image_id": "img_problem_123",
+                "teacher_solution_image_id": "img_teacher_456",
+            },
+        },
+        validation_report_payload={
+            "report_id": "report_1",
+            "passed": True,
+            "issues": [],
+        },
+        correction_plan_payload={
+            "job_id": manifest.job_id,
+            "revision_attempts": 1,
+            "correction_plans": [],
+        },
+        source_image_artifact_ids=source_ids,
+    )
+
+    assert updated.latest_analysis_artifact_ids["candidate_spec"].startswith("spec_")
+    assert updated.latest_analysis_artifact_ids["validation_report"].startswith("report_")
+    assert updated.latest_analysis_artifact_ids["correction_plan"].startswith("correction_")
+
+    for artifact_type, artifacts in updated.analysis_artifacts.items():
+        assert len(artifacts) == 1
+        artifact = artifacts[0]
+        artifact_path = tmp_path / "jobs" / manifest.job_id / artifact.relative_path
+        assert artifact_path.exists()
+        assert artifact.size_bytes == len(artifact_path.read_bytes())
+        assert artifact.source_image_artifact_ids == source_ids
+
+
+def test_store_rejects_analysis_outputs_when_latest_inputs_changed(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    manifest.latest_image_artifact_ids = {
+        "problem": "img_problem_new",
+        "teacher_solution": "img_teacher_new",
+    }
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.save_analysis_outputs(
+            job_id=manifest.job_id,
+            status_value="APPROVED",
+            revision_attempts=1,
+            review_items=[],
+            candidate_spec_payload={"job_id": manifest.job_id},
+            validation_report_payload={"passed": True},
+            correction_plan_payload={"correction_plans": []},
+            source_image_artifact_ids={
+                "problem": "img_problem_old",
+                "teacher_solution": "img_teacher_old",
+            },
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ANALYSIS_SOURCE_CHANGED"
+
+
+def test_read_latest_analysis_payload_rejects_invalid_internal_artifact_type(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+
+    with pytest.raises(ValueError):
+        store.read_latest_analysis_payload(manifest.job_id, "unknown_type")
+
+
+def test_analysis_artifact_routes_return_structured_404_before_run():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+
+    for path, artifact_type in [
+        ("candidate-spec", "candidate_spec"),
+        ("validation-report", "validation_report"),
+        ("correction-plan", "correction_plan"),
+    ]:
+        response = client.get(f"/jobs/{job_id}/{path}")
+
+        assert response.status_code == 404
+        assert_error(response, "ANALYSIS_ARTIFACT_NOT_FOUND")
+        assert response.json()["detail"]["fields"] == {
+            "artifact_type": artifact_type,
+        }
+
+
+def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    job_before_run = client.get(f"/jobs/{job_id}").json()
+    expected_source_ids = job_before_run["latest_image_artifact_ids"]
+    run_response = client.post(f"/jobs/{job_id}/run")
+    run_payload = run_response.json()
+
+    assert run_response.status_code == 200
+    assert set(run_payload["analysis_artifacts"]) == {
+        "candidate_spec",
+        "validation_report",
+        "correction_plan",
+    }
+    assert all(run_payload["latest_analysis_artifact_ids"].values())
+    assert len(run_payload["analysis_artifacts"]["candidate_spec"]) == 1
+    assert len(run_payload["analysis_artifacts"]["validation_report"]) == 1
+    assert len(run_payload["analysis_artifacts"]["correction_plan"]) == 1
+
+    artifacts_response = client.get(f"/jobs/{job_id}/artifacts")
+    candidate_response = client.get(f"/jobs/{job_id}/candidate-spec")
+    validation_response = client.get(f"/jobs/{job_id}/validation-report")
+    correction_response = client.get(f"/jobs/{job_id}/correction-plan")
+
+    assert artifacts_response.status_code == 200
+    assert artifacts_response.json()["latest_analysis_artifact_ids"] == run_payload[
+        "latest_analysis_artifact_ids"
+    ]
+    assert candidate_response.status_code == 200
+    assert candidate_response.json()["source_images"] == {
+        "problem_image_id": expected_source_ids["problem"],
+        "teacher_solution_image_id": expected_source_ids["teacher_solution"],
+    }
+    assert validation_response.status_code == 200
+    assert validation_response.json()["passed"] is True
+    assert correction_response.status_code == 200
+    assert correction_response.json()["job_id"] == job_id
+    assert correction_response.json()["revision_attempts"] == 1
+    assert isinstance(correction_response.json()["correction_plans"], list)

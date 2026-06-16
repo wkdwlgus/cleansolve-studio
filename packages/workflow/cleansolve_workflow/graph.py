@@ -57,6 +57,7 @@ def build_graph():
 def run_mock_workflow(
     job_id: str,
     *,
+    source_image_artifact_ids: dict[str, str | None] | None = None,
     max_revision_attempts: int = 2,
     candidate_spec_override=None,
     correction_patch_override: dict[str, object] | None = None,
@@ -77,6 +78,8 @@ def run_mock_workflow(
         initial_state["candidate_spec"] = candidate_spec_override
     if correction_patch_override is not None:
         initial_state["correction_patch_override"] = correction_patch_override
+    if source_image_artifact_ids is not None:
+        initial_state["source_image_artifact_ids"] = source_image_artifact_ids
 
     return app.invoke(initial_state)
 

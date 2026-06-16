@@ -20,6 +20,19 @@ def test_mock_analysis_client_returns_dimension_marker_spec():
     assert review_items == []
 
 
+def test_mock_client_uses_uploaded_image_artifact_ids_when_provided():
+    spec = MockAnalysisClient().extract_candidate_spec(
+        "job_abc",
+        problem_image_artifact_id="img_problem_123",
+        teacher_solution_image_artifact_id="img_teacher_456",
+    )
+
+    assert spec.source_images == {
+        "problem_image_id": "img_problem_123",
+        "teacher_solution_image_id": "img_teacher_456",
+    }
+
+
 def test_dimension_marker_partial_spec_matches_mock_client_output():
     expected_spec = CandidateSpec.model_validate_json(
         (FIXTURE_DIR / "expected_partial_spec.json").read_text(),

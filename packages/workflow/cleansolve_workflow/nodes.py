@@ -21,7 +21,12 @@ def load_style_preset(state: WorkflowState) -> WorkflowState:
 
 def analyze_sources(state: WorkflowState) -> WorkflowState:
     if "candidate_spec" not in state:
-        state["candidate_spec"] = MockAnalysisClient().extract_candidate_spec(state["job_id"])
+        source_ids = state.get("source_image_artifact_ids") or {}
+        state["candidate_spec"] = MockAnalysisClient().extract_candidate_spec(
+            state["job_id"],
+            problem_image_artifact_id=source_ids.get("problem"),
+            teacher_solution_image_artifact_id=source_ids.get("teacher_solution"),
+        )
     _set_status(state, "SPEC_EXTRACTED")
     return state
 

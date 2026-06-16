@@ -1,4 +1,4 @@
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
 class WorkflowState(TypedDict, total=False):
@@ -15,3 +15,4 @@ class WorkflowState(TypedDict, total=False):
     inspection_issue: dict[str, Any] | None
     status_history: list[str]
     correction_patch_override: dict[str, Any]
+    source_image_artifact_ids: NotRequired[dict[str, str | None]]

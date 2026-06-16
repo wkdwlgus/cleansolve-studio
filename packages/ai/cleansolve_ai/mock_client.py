@@ -2,13 +2,21 @@ from cleansolve_spec.models import CandidateSpec, Element, Evidence, Page, Regio
 
 
 class MockAnalysisClient:
-    def extract_candidate_spec(self, job_id: str) -> CandidateSpec:
+    def extract_candidate_spec(
+        self,
+        job_id: str,
+        *,
+        problem_image_artifact_id: str | None = None,
+        teacher_solution_image_artifact_id: str | None = None,
+    ) -> CandidateSpec:
         return CandidateSpec(
             job_id=job_id,
             version=1,
             source_images={
-                "problem_image_id": f"{job_id}_problem",
-                "teacher_solution_image_id": f"{job_id}_teacher_solution",
+                "problem_image_id": problem_image_artifact_id or f"{job_id}_problem",
+                "teacher_solution_image_id": (
+                    teacher_solution_image_artifact_id or f"{job_id}_teacher_solution"
+                ),
             },
             style=StylePreset(
                 source="system_builtin",
