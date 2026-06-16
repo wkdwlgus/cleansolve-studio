@@ -26,7 +26,7 @@
 | Mock AI adapter | Done | fixture 기반 candidate spec 생성 경로가 있음 |
 | Workflow orchestrator | Partial | LangGraph self-revision prototype이 있으나 실제 image ingestion/artifact 상태와는 아직 느슨함 |
 | FastAPI job API | Partial | job 생성, 이미지 upload/artifact 저장, run precondition, review item shell이 있음 |
-| Web editor shell | Partial | API-backed job load, sample canvas, review panel, policy-gated edits 기반은 있음 |
+| Web editor shell | Done | 이미지 업로드, workflow 실행, candidate spec preview, review panel 표시 흐름이 있음 |
 | HITL policy | Partial | `requires_human_review=true` 필터와 review budget은 구현됨 |
 | Spec patch 저장 | Not Started | 사용자의 수정사항을 server-side patch로 저장하는 API가 없음 |
 | Re-render after patch | Not Started | patch 이후 deterministic re-render API/상태 갱신이 없음 |
@@ -154,7 +154,11 @@
 
 ### M4. Web Upload-to-Review Flow
 
-상태: Partial
+상태: Done
+
+상세 설계: [M4 Web Upload-to-Review Flow 상세 설계](../superpowers/specs/2026-06-16-web-upload-review-flow-design.md)
+
+구현 결과: 웹에서 원본 문제 이미지와 선생님 손풀이 이미지를 선택해 업로드하고, mock workflow 실행 후 candidate spec 기반 Konva preview와 review items를 표시하는 흐름이 구현됨. API 실패는 sample fallback으로 숨기지 않고 한국어 오류 상태로 표시한다.
 
 목표:
 
@@ -288,7 +292,7 @@
 | 6 | 도형 위 highlight/arrow/box/label 표시 | Done | M3 |
 | 7 | dimension_line/dimension_curve endpoint와 anchor 표현 | Done | M3 |
 | 8 | needs_review 내부 검증 관리 | Partial | M2, M8 |
-| 9 | requires_human_review만 사용자 노출 | Partial | M4 |
+| 9 | requires_human_review만 사용자 노출 | Done | M4 |
 | 10 | element type별 허용된 수정 방식 | Partial | M4, M5 |
 | 11 | 수정사항 spec patch 저장 | Not Started | M5 |
 | 12 | 수정 후 deterministic re-render | Not Started | M5 |
@@ -298,7 +302,7 @@
 | 16 | target anchor와 visible stroke 분리 저장 | Done | M0, M3 |
 | 17 | 치수선 label을 group 일부로 관리 | Done | M0, M3 |
 | 18 | 치수선 endpoint와 span 검증 | Partial | M2, M8 |
-| 19 | HITL이 예외 경로로 동작 | Partial | M2, M4 |
+| 19 | HITL이 예외 경로로 동작 | Done | M2, M4 |
 | 20 | 사용자 검수 노출률과 review item 개수 측정 | Partial | M8 |
 | 21 | 생성/렌더링 결과 자동 검수 | Partial | M2, M8 |
 | 22 | 오류 발견 시 correction plan 생성 | Partial | M2, M8 |

@@ -84,6 +84,103 @@ select {
   white-space: nowrap;
 }
 
+.upload-panel {
+  width: min(100%, 760px);
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  border: 1px solid #c7d2de;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.upload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.file-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  color: #25324a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.file-field input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d9e2ec;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #172033;
+  padding: 8px;
+  font-weight: 400;
+}
+
+.file-field input:focus-visible,
+.workflow-actions button:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.35);
+  outline-offset: 2px;
+}
+
+.file-field input:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.file-name {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workflow-actions button {
+  border: 1px solid #0f766e;
+  border-radius: 6px;
+  background: #0f766e;
+  color: #ffffff;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.workflow-actions button[type="button"] {
+  border-color: #94a3b8;
+  background: #ffffff;
+  color: #25324a;
+}
+
+.workflow-actions button:disabled {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.workflow-error {
+  margin: 0;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fff1f2;
+  color: #991b1b;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .canvas-shell {
   width: min(100%, 760px);
   display: grid;
@@ -259,6 +356,7 @@ select {
     height: 360px;
   }
 
+  .upload-grid,
   .anchor-controls {
     grid-template-columns: 1fr;
   }
