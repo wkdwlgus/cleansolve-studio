@@ -15,12 +15,28 @@ from pydantic import BaseModel, Field
 ImageRole = Literal["problem", "teacher_solution"]
 ImageMimeType = Literal["image/png", "image/jpeg"]
 ImageExtension = Literal["png", "jpg"]
-JobStatus = Literal["CREATED", "APPROVED", "NEEDS_REVIEW", "FAILED"]
+AnalysisArtifactType = Literal["candidate_spec", "validation_report", "correction_plan"]
+JobStatus = Literal["CREATED", "APPROVED", "NEEDS_REVIEW", "FAILED", "REVISION_REQUIRED"]
 
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg"}
 MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 JOB_ID_PATTERN = re.compile(r"^job_[0-9a-f]{32}$")
+ANALYSIS_ARTIFACT_TYPES: tuple[AnalysisArtifactType, ...] = (
+    "candidate_spec",
+    "validation_report",
+    "correction_plan",
+)
+ANALYSIS_ARTIFACT_PREFIXES: dict[AnalysisArtifactType, str] = {
+    "candidate_spec": "spec",
+    "validation_report": "report",
+    "correction_plan": "correction",
+}
+ANALYSIS_ARTIFACT_DIRECTORIES: dict[AnalysisArtifactType, str] = {
+    "candidate_spec": "specs",
+    "validation_report": "reports",
+    "correction_plan": "corrections",
+}
 
 ERROR_MESSAGES = {
     "JOB_NOT_FOUND": "작업을 찾을 수 없습니다.",
@@ -44,6 +60,24 @@ class ImageArtifact(BaseModel):
     created_at: str
 
 
+class AnalysisArtifact(BaseModel):
+    artifact_id: str
+    type: AnalysisArtifactType
+    relative_path: str
+    size_bytes: int = Field(ge=1)
+    sha256: str = Field(min_length=64, max_length=64)
+    created_at: str
+    source_image_artifact_ids: dict[ImageRole, str]
+
+
+def _empty_analysis_artifacts() -> dict[AnalysisArtifactType, list[AnalysisArtifact]]:
+    return {artifact_type: [] for artifact_type in ANALYSIS_ARTIFACT_TYPES}
+
+
+def _empty_latest_analysis_artifact_ids() -> dict[AnalysisArtifactType, str | None]:
+    return {artifact_type: None for artifact_type in ANALYSIS_ARTIFACT_TYPES}
+
+
 class JobManifest(BaseModel):
     job_id: str
     status: JobStatus
@@ -53,6 +87,12 @@ class JobManifest(BaseModel):
     review_items: list[dict[str, Any]]
     image_artifacts: dict[ImageRole, list[ImageArtifact]]
     latest_image_artifact_ids: dict[ImageRole, str | None]
+    analysis_artifacts: dict[AnalysisArtifactType, list[AnalysisArtifact]] = Field(
+        default_factory=_empty_analysis_artifacts
+    )
+    latest_analysis_artifact_ids: dict[AnalysisArtifactType, str | None] = Field(
+        default_factory=_empty_latest_analysis_artifact_ids
+    )
 
 
 def _utc_now() -> str:
@@ -65,6 +105,11 @@ def _new_job_id() -> str:
 
 def _new_artifact_id() -> str:
     return f"img_{uuid4().hex}"
+
+
+def _new_analysis_artifact_id(artifact_type: AnalysisArtifactType) -> str:
+    prefix = ANALYSIS_ARTIFACT_PREFIXES[artifact_type]
+    return f"{prefix}_{uuid4().hex}"
 
 
 def _detect_magic_type(data_prefix: bytes) -> str | None:
@@ -114,6 +159,11 @@ def job_response(manifest: JobManifest) -> dict[str, Any]:
             role: [artifact.model_dump(mode="json") for artifact in artifacts]
             for role, artifacts in manifest.image_artifacts.items()
         },
+        "analysis_artifacts": {
+            artifact_type: [artifact.model_dump(mode="json") for artifact in artifacts]
+            for artifact_type, artifacts in manifest.analysis_artifacts.items()
+        },
+        "latest_analysis_artifact_ids": manifest.latest_analysis_artifact_ids,
     }
 
 
@@ -182,6 +232,60 @@ class LocalArtifactStore:
                     "status": status_value,
                     "revision_attempts": revision_attempts,
                     "review_items": review_items,
+                    "updated_at": _utc_now(),
+                }
+            )
+            self.save_manifest(updated_manifest)
+            return updated_manifest
+
+    def save_analysis_outputs(
+        self,
+        job_id: str,
+        *,
+        status_value: JobStatus,
+        revision_attempts: int,
+        review_items: list[dict[str, Any]],
+        candidate_spec_payload: dict[str, Any],
+        validation_report_payload: dict[str, Any],
+        correction_plan_payload: dict[str, Any],
+        source_image_artifact_ids: dict[ImageRole, str],
+    ) -> JobManifest:
+        _validate_job_id(job_id)
+        payloads: dict[AnalysisArtifactType, dict[str, Any]] = {
+            "candidate_spec": candidate_spec_payload,
+            "validation_report": validation_report_payload,
+            "correction_plan": correction_plan_payload,
+        }
+
+        with self._job_lock(job_id):
+            manifest = self.get_job(job_id)
+            analysis_artifacts = {
+                artifact_type: list(manifest.analysis_artifacts.get(artifact_type, []))
+                for artifact_type in ANALYSIS_ARTIFACT_TYPES
+            }
+            latest_analysis_artifact_ids = {
+                artifact_type: manifest.latest_analysis_artifact_ids.get(artifact_type)
+                for artifact_type in ANALYSIS_ARTIFACT_TYPES
+            }
+
+            for artifact_type, payload in payloads.items():
+                artifact = self._write_analysis_artifact(
+                    job_id,
+                    artifact_type,
+                    payload,
+                    source_image_artifact_ids,
+                )
+                analysis_artifacts[artifact_type].append(artifact)
+                latest_analysis_artifact_ids[artifact_type] = artifact.artifact_id
+
+            updated_manifest = JobManifest.model_validate(
+                {
+                    **manifest.model_dump(mode="python"),
+                    "status": status_value,
+                    "revision_attempts": revision_attempts,
+                    "review_items": review_items,
+                    "analysis_artifacts": analysis_artifacts,
+                    "latest_analysis_artifact_ids": latest_analysis_artifact_ids,
                     "updated_at": _utc_now(),
                 }
             )
@@ -285,6 +389,44 @@ class LocalArtifactStore:
 
     def _role_directory(self, job_id: str, role: ImageRole) -> Path:
         return self._job_root(job_id) / "artifacts" / "images" / role
+
+    def _write_analysis_artifact(
+        self,
+        job_id: str,
+        artifact_type: AnalysisArtifactType,
+        payload: dict[str, Any],
+        source_image_artifact_ids: dict[ImageRole, str],
+    ) -> AnalysisArtifact:
+        artifact_id = _new_analysis_artifact_id(artifact_type)
+        relative_path = (
+            f"artifacts/{ANALYSIS_ARTIFACT_DIRECTORIES[artifact_type]}/{artifact_id}.json"
+        )
+        final_path = self._job_root(job_id) / relative_path
+        temp_path = final_path.with_name(f"{artifact_id}.json.tmp")
+        payload_bytes = json.dumps(
+            payload,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ).encode("utf-8")
+
+        try:
+            final_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path.write_bytes(payload_bytes)
+            temp_path.replace(final_path)
+        except OSError as exc:
+            temp_path.unlink(missing_ok=True)
+            raise _error("STORAGE_WRITE_FAILED", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
+
+        return AnalysisArtifact(
+            artifact_id=artifact_id,
+            type=artifact_type,
+            relative_path=relative_path,
+            size_bytes=len(payload_bytes),
+            sha256=hashlib.sha256(payload_bytes).hexdigest(),
+            created_at=_utc_now(),
+            source_image_artifact_ids=source_image_artifact_ids,
+        )
 
     def _job_lock(self, job_id: str) -> Lock:
         key = (str(self.storage_root), job_id)

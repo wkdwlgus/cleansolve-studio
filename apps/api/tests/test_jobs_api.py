@@ -249,3 +249,91 @@ def test_manifest_store_rejects_invalid_workflow_status(tmp_path):
         )
 
     assert store.get_job(manifest.job_id).status == "CREATED"
+
+
+def test_old_manifest_json_defaults_analysis_artifact_fields(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    job_id = "job_00000000000000000000000000000000"
+    job_root = tmp_path / "jobs" / job_id
+    job_root.mkdir(parents=True)
+    (job_root / "manifest.json").write_text(
+        """
+{
+  "job_id": "job_00000000000000000000000000000000",
+  "status": "CREATED",
+  "created_at": "2026-06-16T00:00:00Z",
+  "updated_at": "2026-06-16T00:00:00Z",
+  "revision_attempts": 0,
+  "review_items": [],
+  "image_artifacts": {
+    "problem": [],
+    "teacher_solution": []
+  },
+  "latest_image_artifact_ids": {
+    "problem": null,
+    "teacher_solution": null
+  }
+}
+""",
+        encoding="utf-8",
+    )
+
+    manifest = store.get_job(job_id)
+
+    assert manifest.analysis_artifacts == {
+        "candidate_spec": [],
+        "validation_report": [],
+        "correction_plan": [],
+    }
+    assert manifest.latest_analysis_artifact_ids == {
+        "candidate_spec": None,
+        "validation_report": None,
+        "correction_plan": None,
+    }
+
+
+def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    source_ids = {
+        "problem": "img_problem_123",
+        "teacher_solution": "img_teacher_456",
+    }
+
+    updated = store.save_analysis_outputs(
+        job_id=manifest.job_id,
+        status_value="APPROVED",
+        revision_attempts=1,
+        review_items=[],
+        candidate_spec_payload={
+            "job_id": manifest.job_id,
+            "version": 1,
+            "source_images": {
+                "problem_image_id": "img_problem_123",
+                "teacher_solution_image_id": "img_teacher_456",
+            },
+        },
+        validation_report_payload={
+            "report_id": "report_1",
+            "passed": True,
+            "issues": [],
+        },
+        correction_plan_payload={
+            "job_id": manifest.job_id,
+            "revision_attempts": 1,
+            "correction_plans": [],
+        },
+        source_image_artifact_ids=source_ids,
+    )
+
+    assert updated.latest_analysis_artifact_ids["candidate_spec"].startswith("spec_")
+    assert updated.latest_analysis_artifact_ids["validation_report"].startswith("report_")
+    assert updated.latest_analysis_artifact_ids["correction_plan"].startswith("correction_")
+
+    for artifact_type, artifacts in updated.analysis_artifacts.items():
+        assert len(artifacts) == 1
+        artifact = artifacts[0]
+        artifact_path = tmp_path / "jobs" / manifest.job_id / artifact.relative_path
+        assert artifact_path.exists()
+        assert artifact.size_bytes == len(artifact_path.read_bytes())
+        assert artifact.source_image_artifact_ids == source_ids
