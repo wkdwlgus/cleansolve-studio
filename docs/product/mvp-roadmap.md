@@ -20,7 +20,7 @@
 | 영역 | 상태 | 메모 |
 | --- | --- | --- |
 | Repository scaffold | Done | monorepo, Python packages, web app, docs, fixture 구조가 있음 |
-| Candidate spec model | Partial | MVP primitive registry와 validation 기반은 있으나 모든 primitive별 세부 schema는 아직 얇음 |
+| Candidate spec model | Partial | MVP primitive registry와 validation 기반은 있으나 모든 primitive별 세부 schema는 아직 얇음. M2 artifact pipeline은 완료됨 |
 | Validation | Partial | style, bbox, evidence, dimension anchor, review budget 중심 검증은 있음 |
 | Deterministic renderer | Partial | dimension line, dimension curve, freehand dimension marker SVG overlay 지원 |
 | Mock AI adapter | Done | fixture 기반 candidate spec 생성 경로가 있음 |
@@ -32,7 +32,7 @@
 | Re-render after patch | Not Started | patch 이후 deterministic re-render API/상태 갱신이 없음 |
 | Export | Not Started | PNG/PDF export endpoint와 artifact 저장이 없음 |
 | Real OpenAI adapter | Not Started | mock adapter는 있으나 실제 OpenAI 호출 경로는 아직 없음 |
-| E2E harness | Partial | unit/fixture harness는 있으나 upload-to-export end-to-end 검증은 없음 |
+| E2E harness | Partial | upload-to-analysis fixture 경로는 완료됐으나 upload-to-export end-to-end 검증은 아직 없음 |
 
 ## Milestone
 
@@ -91,7 +91,11 @@
 
 ### M2. Candidate Spec Pipeline
 
-상태: Partial
+상태: Done
+
+상세 설계: [M2 Candidate Spec Pipeline 상세 설계](../superpowers/specs/2026-06-16-candidate-spec-pipeline-design.md)
+
+구현 결과: uploaded image artifact id를 mock workflow candidate spec source로 연결하고, candidate spec, validation report, correction plan을 job analysis artifact로 저장/조회하는 API가 구현됨.
 
 목표:
 
@@ -274,7 +278,7 @@
 | --- | --- | --- | --- |
 | 1 | 원본 문제 이미지와 손풀이 이미지 업로드 | Done | M1 |
 | 2 | 기본 내장 손글씨 스타일 프리셋 로드 | Done | M0 |
-| 3 | candidate spec 생성 또는 mock spec 처리 | Partial | M2 |
+| 3 | candidate spec 생성 또는 mock spec 처리 | Done | M2 |
 | 4 | candidate spec 기반 overlay preview | Partial | M3 |
 | 5 | 하단 풀이 수식/텍스트 재배치 | Not Started | M3 |
 | 6 | 도형 위 highlight/arrow/box/label 표시 | Not Started | M3 |
