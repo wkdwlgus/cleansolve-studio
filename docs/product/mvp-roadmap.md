@@ -22,7 +22,7 @@
 | Repository scaffold | Done | monorepo, Python packages, web app, docs, fixture 구조가 있음 |
 | Candidate spec model | Partial | MVP primitive registry와 validation 기반은 있으나 모든 primitive별 세부 schema는 아직 얇음. M2 artifact pipeline은 완료됨 |
 | Validation | Partial | style, bbox, evidence, dimension anchor, review budget 중심 검증은 있음 |
-| Deterministic renderer | Partial | dimension line, dimension curve, freehand dimension marker SVG overlay 지원 |
+| Deterministic renderer | Done | M3 MVP primitive SVG overlay와 source image metadata 보존 지원 |
 | Mock AI adapter | Done | fixture 기반 candidate spec 생성 경로가 있음 |
 | Workflow orchestrator | Partial | LangGraph self-revision prototype이 있으나 실제 image ingestion/artifact 상태와는 아직 느슨함 |
 | FastAPI job API | Partial | job 생성, 이미지 upload/artifact 저장, run precondition, review item shell이 있음 |
@@ -119,7 +119,11 @@
 
 ### M3. Renderer Coverage Expansion
 
-상태: Partial
+상태: Done
+
+상세 설계: [M3 Renderer Coverage Expansion 상세 설계](../superpowers/specs/2026-06-16-renderer-coverage-expansion-design.md)
+
+구현 결과: `formula_line`, `text_note`, `highlight_line`, `highlight_curve`, `arrow`, `box`, `circle`, `point_label`, `segment_label`, `dimension_line`, `dimension_curve`, `freehand_dimension_marker`의 deterministic SVG overlay 출력이 구현됨. Renderer는 원본 image artifact id를 SVG metadata로 보존하고, malformed geometry와 M3 범위 밖 primitive는 crash 없이 skip한다.
 
 목표:
 
@@ -279,10 +283,10 @@
 | 1 | 원본 문제 이미지와 손풀이 이미지 업로드 | Done | M1 |
 | 2 | 기본 내장 손글씨 스타일 프리셋 로드 | Done | M0 |
 | 3 | candidate spec 생성 또는 mock spec 처리 | Done | M2 |
-| 4 | candidate spec 기반 overlay preview | Partial | M3 |
-| 5 | 하단 풀이 수식/텍스트 재배치 | Not Started | M3 |
-| 6 | 도형 위 highlight/arrow/box/label 표시 | Not Started | M3 |
-| 7 | dimension_line/dimension_curve endpoint와 anchor 표현 | Partial | M3 |
+| 4 | candidate spec 기반 overlay preview | Done | M3 |
+| 5 | 하단 풀이 수식/텍스트 재배치 | Partial | M3 |
+| 6 | 도형 위 highlight/arrow/box/label 표시 | Done | M3 |
+| 7 | dimension_line/dimension_curve endpoint와 anchor 표현 | Done | M3 |
 | 8 | needs_review 내부 검증 관리 | Partial | M2, M8 |
 | 9 | requires_human_review만 사용자 노출 | Partial | M4 |
 | 10 | element type별 허용된 수정 방식 | Partial | M4, M5 |
