@@ -41,6 +41,7 @@ ANALYSIS_ARTIFACT_DIRECTORIES: dict[AnalysisArtifactType, str] = {
 ERROR_MESSAGES = {
     "JOB_NOT_FOUND": "작업을 찾을 수 없습니다.",
     "ANALYSIS_ARTIFACT_NOT_FOUND": "분석 artifact를 찾을 수 없습니다.",
+    "ANALYSIS_SOURCE_CHANGED": "분석 실행 중 입력 이미지가 변경되었습니다.",
     "UNSUPPORTED_IMAGE_TYPE": "지원하지 않는 이미지 형식입니다.",
     "INVALID_IMAGE_BYTES": "이미지 파일 내용이 MIME 형식과 일치하지 않습니다.",
     "EMPTY_IMAGE": "빈 이미지 파일은 업로드할 수 없습니다.",
@@ -268,6 +269,16 @@ class LocalArtifactStore:
 
         with self._job_lock(job_id):
             manifest = self.get_job(job_id)
+            if manifest.latest_image_artifact_ids != source_image_artifact_ids:
+                raise _error(
+                    "ANALYSIS_SOURCE_CHANGED",
+                    status.HTTP_409_CONFLICT,
+                    {
+                        "source_image_artifact_ids": source_image_artifact_ids,
+                        "latest_image_artifact_ids": manifest.latest_image_artifact_ids,
+                    },
+                )
+
             analysis_artifacts = {
                 artifact_type: list(manifest.analysis_artifacts.get(artifact_type, []))
                 for artifact_type in ANALYSIS_ARTIFACT_TYPES

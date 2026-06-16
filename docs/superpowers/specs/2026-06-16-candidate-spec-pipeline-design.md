@@ -319,11 +319,14 @@ M2에서 아래 error를 추가한다.
 
 ```python
 "ANALYSIS_ARTIFACT_NOT_FOUND": "분석 artifact를 찾을 수 없습니다."
+"ANALYSIS_SOURCE_CHANGED": "분석 실행 중 입력 이미지가 변경되었습니다."
 ```
 
 Artifact metadata가 manifest에 있는데 파일이 없으면 `ANALYSIS_ARTIFACT_NOT_FOUND` 404를 반환한다.
 
 Artifact type이 내부 helper에 잘못 전달되면 `ValueError`를 발생시킨다. 외부 API route는 고정 route만 제공하므로 사용자 입력 artifact type은 받지 않는다.
+
+`POST /jobs/{job_id}/run`이 workflow 실행을 시작한 뒤 새 이미지가 업로드되어 `latest_image_artifact_ids`가 바뀌면, analysis artifact를 저장하지 않고 `ANALYSIS_SOURCE_CHANGED` 409를 반환한다. 이 비교는 manifest를 다시 읽은 뒤 job lock 안에서 수행한다.
 
 ## 상태 정책
 

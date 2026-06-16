@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -299,6 +300,8 @@ def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
         "problem": "img_problem_123",
         "teacher_solution": "img_teacher_456",
     }
+    manifest.latest_image_artifact_ids = source_ids
+    store.save_manifest(manifest)
 
     updated = store.save_analysis_outputs(
         job_id=manifest.job_id,
@@ -337,6 +340,34 @@ def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
         assert artifact_path.exists()
         assert artifact.size_bytes == len(artifact_path.read_bytes())
         assert artifact.source_image_artifact_ids == source_ids
+
+
+def test_store_rejects_analysis_outputs_when_latest_inputs_changed(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    manifest.latest_image_artifact_ids = {
+        "problem": "img_problem_new",
+        "teacher_solution": "img_teacher_new",
+    }
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.save_analysis_outputs(
+            job_id=manifest.job_id,
+            status_value="APPROVED",
+            revision_attempts=1,
+            review_items=[],
+            candidate_spec_payload={"job_id": manifest.job_id},
+            validation_report_payload={"passed": True},
+            correction_plan_payload={"correction_plans": []},
+            source_image_artifact_ids={
+                "problem": "img_problem_old",
+                "teacher_solution": "img_teacher_old",
+            },
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ANALYSIS_SOURCE_CHANGED"
 
 
 def test_read_latest_analysis_payload_rejects_invalid_internal_artifact_type(tmp_path):
