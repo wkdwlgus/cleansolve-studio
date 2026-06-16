@@ -337,3 +337,64 @@ def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
         assert artifact_path.exists()
         assert artifact.size_bytes == len(artifact_path.read_bytes())
         assert artifact.source_image_artifact_ids == source_ids
+
+
+def test_analysis_artifact_routes_return_structured_404_before_run():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+
+    for path, artifact_type in [
+        ("candidate-spec", "candidate_spec"),
+        ("validation-report", "validation_report"),
+        ("correction-plan", "correction_plan"),
+    ]:
+        response = client.get(f"/jobs/{job_id}/{path}")
+
+        assert response.status_code == 404
+        assert_error(response, "ANALYSIS_ARTIFACT_NOT_FOUND")
+        assert response.json()["detail"]["fields"] == {
+            "artifact_type": artifact_type,
+        }
+
+
+def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    job_before_run = client.get(f"/jobs/{job_id}").json()
+    expected_source_ids = job_before_run["latest_image_artifact_ids"]
+    run_response = client.post(f"/jobs/{job_id}/run")
+    run_payload = run_response.json()
+
+    assert run_response.status_code == 200
+    assert set(run_payload["analysis_artifacts"]) == {
+        "candidate_spec",
+        "validation_report",
+        "correction_plan",
+    }
+    assert all(run_payload["latest_analysis_artifact_ids"].values())
+    assert len(run_payload["analysis_artifacts"]["candidate_spec"]) == 1
+    assert len(run_payload["analysis_artifacts"]["validation_report"]) == 1
+    assert len(run_payload["analysis_artifacts"]["correction_plan"]) == 1
+
+    artifacts_response = client.get(f"/jobs/{job_id}/artifacts")
+    candidate_response = client.get(f"/jobs/{job_id}/candidate-spec")
+    validation_response = client.get(f"/jobs/{job_id}/validation-report")
+    correction_response = client.get(f"/jobs/{job_id}/correction-plan")
+
+    assert artifacts_response.status_code == 200
+    assert artifacts_response.json()["latest_analysis_artifact_ids"] == run_payload[
+        "latest_analysis_artifact_ids"
+    ]
+    assert candidate_response.status_code == 200
+    assert candidate_response.json()["source_images"] == {
+        "problem_image_id": expected_source_ids["problem"],
+        "teacher_solution_image_id": expected_source_ids["teacher_solution"],
+    }
+    assert validation_response.status_code == 200
+    assert validation_response.json()["passed"] is True
+    assert correction_response.status_code == 200
+    assert correction_response.json()["job_id"] == job_id
+    assert correction_response.json()["revision_attempts"] == 1
+    assert isinstance(correction_response.json()["correction_plans"], list)

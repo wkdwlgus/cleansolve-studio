@@ -40,6 +40,7 @@ ANALYSIS_ARTIFACT_DIRECTORIES: dict[AnalysisArtifactType, str] = {
 
 ERROR_MESSAGES = {
     "JOB_NOT_FOUND": "작업을 찾을 수 없습니다.",
+    "ANALYSIS_ARTIFACT_NOT_FOUND": "분석 artifact를 찾을 수 없습니다.",
     "UNSUPPORTED_IMAGE_TYPE": "지원하지 않는 이미지 형식입니다.",
     "INVALID_IMAGE_BYTES": "이미지 파일 내용이 MIME 형식과 일치하지 않습니다.",
     "EMPTY_IMAGE": "빈 이미지 파일은 업로드할 수 없습니다.",
@@ -133,6 +134,14 @@ def _error(code: str, status_code: int, fields: dict[str, Any] | None = None) ->
 
 def job_not_found_error(job_id: str) -> HTTPException:
     return _error("JOB_NOT_FOUND", status.HTTP_404_NOT_FOUND, {"job_id": job_id})
+
+
+def analysis_artifact_not_found_error(artifact_type: AnalysisArtifactType) -> HTTPException:
+    return _error(
+        "ANALYSIS_ARTIFACT_NOT_FOUND",
+        status.HTTP_404_NOT_FOUND,
+        {"artifact_type": artifact_type},
+    )
 
 
 def _validate_job_id(job_id: str) -> None:
@@ -291,6 +300,46 @@ class LocalArtifactStore:
             )
             self.save_manifest(updated_manifest)
             return updated_manifest
+
+    def analysis_artifacts_response(self, job_id: str) -> dict[str, Any]:
+        manifest = self.get_job(job_id)
+        return {
+            "job_id": manifest.job_id,
+            "analysis_artifacts": {
+                artifact_type: [
+                    artifact.model_dump(mode="json")
+                    for artifact in artifacts
+                ]
+                for artifact_type, artifacts in manifest.analysis_artifacts.items()
+            },
+            "latest_analysis_artifact_ids": manifest.latest_analysis_artifact_ids,
+        }
+
+    def read_latest_analysis_payload(
+        self,
+        job_id: str,
+        artifact_type: AnalysisArtifactType,
+    ) -> dict[str, Any]:
+        manifest = self.get_job(job_id)
+        artifact_id = manifest.latest_analysis_artifact_ids[artifact_type]
+        if artifact_id is None:
+            raise analysis_artifact_not_found_error(artifact_type)
+
+        artifact = next(
+            (
+                candidate
+                for candidate in manifest.analysis_artifacts[artifact_type]
+                if candidate.artifact_id == artifact_id
+            ),
+            None,
+        )
+        if artifact is None:
+            raise analysis_artifact_not_found_error(artifact_type)
+
+        artifact_path = self._job_root(job_id) / artifact.relative_path
+        if not artifact_path.exists():
+            raise analysis_artifact_not_found_error(artifact_type)
+        return json.loads(artifact_path.read_text(encoding="utf-8"))
 
     async def save_image(
         self,

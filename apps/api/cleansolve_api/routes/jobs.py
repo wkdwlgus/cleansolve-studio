@@ -1,6 +1,10 @@
 from fastapi import APIRouter, File, UploadFile, status
 
-from cleansolve_api.artifacts import LocalArtifactStore, job_response, missing_required_images_error
+from cleansolve_api.artifacts import (
+    LocalArtifactStore,
+    job_response,
+    missing_required_images_error,
+)
 from cleansolve_api.settings import settings
 from cleansolve_workflow.graph import run_mock_workflow
 
@@ -50,12 +54,27 @@ def run_job(job_id: str) -> dict[str, object]:
     if missing_roles:
         raise missing_required_images_error(missing_roles)
 
-    state = run_mock_workflow(job_id=job_id)
-    updated_manifest = store.update_after_run(
+    source_image_artifact_ids = {
+        "problem": manifest.latest_image_artifact_ids["problem"],
+        "teacher_solution": manifest.latest_image_artifact_ids["teacher_solution"],
+    }
+    state = run_mock_workflow(
+        job_id=job_id,
+        source_image_artifact_ids=source_image_artifact_ids,
+    )
+    updated_manifest = store.save_analysis_outputs(
         job_id=job_id,
         status_value=state["status"],
         revision_attempts=state["revision_attempts"],
         review_items=list(state.get("review_items", [])),
+        candidate_spec_payload=state["candidate_spec"].model_dump(mode="json"),
+        validation_report_payload=state["validation_reports"][-1].model_dump(mode="json"),
+        correction_plan_payload={
+            "job_id": job_id,
+            "revision_attempts": state["revision_attempts"],
+            "correction_plans": state.get("correction_plans", []),
+        },
+        source_image_artifact_ids=source_image_artifact_ids,
     )
     return job_response(updated_manifest)
 
@@ -63,6 +82,26 @@ def run_job(job_id: str) -> dict[str, object]:
 @router.get("/{job_id}")
 def get_job(job_id: str) -> dict[str, object]:
     return job_response(_store().get_job(job_id))
+
+
+@router.get("/{job_id}/artifacts")
+def get_analysis_artifacts(job_id: str) -> dict[str, object]:
+    return _store().analysis_artifacts_response(job_id)
+
+
+@router.get("/{job_id}/candidate-spec")
+def get_candidate_spec(job_id: str) -> dict[str, object]:
+    return _store().read_latest_analysis_payload(job_id, "candidate_spec")
+
+
+@router.get("/{job_id}/validation-report")
+def get_validation_report(job_id: str) -> dict[str, object]:
+    return _store().read_latest_analysis_payload(job_id, "validation_report")
+
+
+@router.get("/{job_id}/correction-plan")
+def get_correction_plan(job_id: str) -> dict[str, object]:
+    return _store().read_latest_analysis_payload(job_id, "correction_plan")
 
 
 @router.get("/{job_id}/review-items")
