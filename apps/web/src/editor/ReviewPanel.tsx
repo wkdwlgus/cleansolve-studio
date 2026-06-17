@@ -3,9 +3,11 @@ import { REVIEW_ITEM_LIMIT, filterHumanReviewItems, getPrimitiveTypeLabel, getRe
 
 interface ReviewPanelProps {
   items: ReviewItem[];
+  onSelectItem?: (item: ReviewItem) => void;
+  selectionDisabled?: boolean;
 }
 
-export function ReviewPanel({ items }: ReviewPanelProps) {
+export function ReviewPanel({ items, onSelectItem, selectionDisabled = false }: ReviewPanelProps) {
   const reviewItems = filterHumanReviewItems(items);
 
   return (
@@ -22,6 +24,11 @@ export function ReviewPanel({ items }: ReviewPanelProps) {
             <li key={item.element_id}>
               <strong>{getPrimitiveTypeLabel(item.type)}</strong>
               <span>{getReviewReasonText(item)}</span>
+              {onSelectItem ? (
+                <button type="button" disabled={selectionDisabled} onClick={() => onSelectItem(item)}>
+                  수정
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>
