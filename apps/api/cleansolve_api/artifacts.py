@@ -17,6 +17,8 @@ ImageMimeType = Literal["image/png", "image/jpeg"]
 ImageExtension = Literal["png", "jpg"]
 AnalysisArtifactType = Literal["candidate_spec", "validation_report", "correction_plan"]
 RenderArtifactType = Literal["overlay_svg"]
+ExportFormat = Literal["png"]
+ExportMimeType = Literal["image/png"]
 JobStatus = Literal["CREATED", "APPROVED", "NEEDS_REVIEW", "FAILED", "REVISION_REQUIRED"]
 
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg"}
@@ -52,6 +54,12 @@ ERROR_MESSAGES = {
     "SPEC_PATCH_REJECTED": "허용되지 않는 spec 수정입니다.",
     "SPEC_VERSION_CONFLICT": "화면의 spec version이 최신이 아닙니다.",
     "RENDER_ARTIFACT_NOT_FOUND": "렌더링 preview artifact를 찾을 수 없습니다.",
+    "UNSUPPORTED_EXPORT_FORMAT": "지원하지 않는 export 형식입니다.",
+    "EXPORT_JOB_NOT_READY": "승인된 job만 export할 수 있습니다.",
+    "EXPORT_SPEC_NOT_READY": "export할 candidate spec이 아직 없습니다.",
+    "EXPORT_RENDER_NOT_READY": "export할 render artifact가 최신 상태가 아닙니다.",
+    "EXPORT_SOURCE_CHANGED": "export 생성 중 입력 artifact가 변경되었습니다.",
+    "EXPORT_ARTIFACT_NOT_FOUND": "export artifact를 찾을 수 없습니다.",
     "STORAGE_WRITE_FAILED": "이미지 artifact 저장에 실패했습니다.",
 }
 
@@ -88,6 +96,19 @@ class RenderArtifact(BaseModel):
     source_image_artifact_ids: dict[ImageRole, str]
 
 
+class ExportArtifact(BaseModel):
+    artifact_id: str
+    format: ExportFormat
+    mime_type: ExportMimeType
+    relative_path: str
+    size_bytes: int = Field(ge=1)
+    sha256: str = Field(min_length=64, max_length=64)
+    created_at: str
+    candidate_spec_artifact_id: str
+    render_artifact_id: str
+    source_image_artifact_ids: dict[ImageRole, str]
+
+
 def _empty_analysis_artifacts() -> dict[AnalysisArtifactType, list[AnalysisArtifact]]:
     return {artifact_type: [] for artifact_type in ANALYSIS_ARTIFACT_TYPES}
 
@@ -113,6 +134,8 @@ class JobManifest(BaseModel):
     )
     render_artifacts: list[RenderArtifact] = Field(default_factory=list)
     latest_render_artifact_id: str | None = None
+    export_artifacts: list[ExportArtifact] = Field(default_factory=list)
+    latest_export_artifact_id: str | None = None
 
 
 def _utc_now() -> str:
@@ -134,6 +157,10 @@ def _new_analysis_artifact_id(artifact_type: AnalysisArtifactType) -> str:
 
 def _new_render_artifact_id() -> str:
     return f"render_{uuid4().hex}"
+
+
+def _new_export_artifact_id() -> str:
+    return f"export_{uuid4().hex}"
 
 
 def _detect_magic_type(data_prefix: bytes) -> str | None:
@@ -169,6 +196,34 @@ def analysis_artifact_not_found_error(artifact_type: AnalysisArtifactType) -> HT
 
 def render_artifact_not_found_error() -> HTTPException:
     return _error("RENDER_ARTIFACT_NOT_FOUND", status.HTTP_404_NOT_FOUND)
+
+
+def unsupported_export_format_error(received: str) -> HTTPException:
+    return _error(
+        "UNSUPPORTED_EXPORT_FORMAT",
+        status.HTTP_400_BAD_REQUEST,
+        {"allowed": ["png"], "received": received},
+    )
+
+
+def export_job_not_ready_error(status_value: str) -> HTTPException:
+    return _error("EXPORT_JOB_NOT_READY", status.HTTP_409_CONFLICT, {"status": status_value})
+
+
+def export_spec_not_ready_error() -> HTTPException:
+    return _error("EXPORT_SPEC_NOT_READY", status.HTTP_409_CONFLICT)
+
+
+def export_render_not_ready_error(fields: dict[str, Any] | None = None) -> HTTPException:
+    return _error("EXPORT_RENDER_NOT_READY", status.HTTP_409_CONFLICT, fields)
+
+
+def export_source_changed_error(fields: dict[str, Any]) -> HTTPException:
+    return _error("EXPORT_SOURCE_CHANGED", status.HTTP_409_CONFLICT, fields)
+
+
+def export_artifact_not_found_error() -> HTTPException:
+    return _error("EXPORT_ARTIFACT_NOT_FOUND", status.HTTP_404_NOT_FOUND)
 
 
 def spec_not_ready_error() -> HTTPException:
@@ -242,6 +297,10 @@ def job_response(manifest: JobManifest) -> dict[str, Any]:
             artifact.model_dump(mode="json") for artifact in manifest.render_artifacts
         ],
         "latest_render_artifact_id": manifest.latest_render_artifact_id,
+        "export_artifacts": [
+            artifact.model_dump(mode="json") for artifact in manifest.export_artifacts
+        ],
+        "latest_export_artifact_id": manifest.latest_export_artifact_id,
     }
 
 
@@ -513,6 +572,115 @@ class LocalArtifactStore:
             "svg": artifact_path.read_text(encoding="utf-8"),
         }
 
+    def latest_render_artifact(self, job_id: str) -> tuple[JobManifest, RenderArtifact, str]:
+        manifest = self.get_job(job_id)
+        artifact_id = manifest.latest_render_artifact_id
+        if artifact_id is None:
+            raise render_artifact_not_found_error()
+
+        artifact = next(
+            (
+                candidate
+                for candidate in manifest.render_artifacts
+                if candidate.artifact_id == artifact_id
+            ),
+            None,
+        )
+        if artifact is None:
+            raise render_artifact_not_found_error()
+
+        artifact_path = self._job_root(job_id) / artifact.relative_path
+        if not artifact_path.exists():
+            raise render_artifact_not_found_error()
+        return manifest, artifact, artifact_path.read_text(encoding="utf-8")
+
+    def save_export_artifact(
+        self,
+        job_id: str,
+        *,
+        png_bytes: bytes,
+        candidate_spec_artifact_id: str,
+        render_artifact_id: str,
+        source_image_artifact_ids: dict[ImageRole, str],
+    ) -> tuple[JobManifest, ExportArtifact]:
+        _validate_job_id(job_id)
+        with self._job_lock(job_id):
+            manifest = self.get_job(job_id)
+            latest_candidate_spec_artifact_id = manifest.latest_analysis_artifact_ids[
+                "candidate_spec"
+            ]
+            if latest_candidate_spec_artifact_id != candidate_spec_artifact_id:
+                raise export_source_changed_error(
+                    {
+                        "candidate_spec_artifact_id": candidate_spec_artifact_id,
+                        "latest_candidate_spec_artifact_id": latest_candidate_spec_artifact_id,
+                    }
+                )
+            if manifest.latest_render_artifact_id != render_artifact_id:
+                raise export_source_changed_error(
+                    {
+                        "render_artifact_id": render_artifact_id,
+                        "latest_render_artifact_id": manifest.latest_render_artifact_id,
+                    }
+                )
+            if manifest.latest_image_artifact_ids != source_image_artifact_ids:
+                raise export_source_changed_error(
+                    {
+                        "source_image_artifact_ids": source_image_artifact_ids,
+                        "latest_image_artifact_ids": manifest.latest_image_artifact_ids,
+                    }
+                )
+
+            artifact = self._write_export_artifact(
+                job_id,
+                png_bytes,
+                candidate_spec_artifact_id,
+                render_artifact_id,
+                source_image_artifact_ids,
+            )
+            updated_manifest = JobManifest.model_validate(
+                {
+                    **manifest.model_dump(mode="python"),
+                    "export_artifacts": [*manifest.export_artifacts, artifact],
+                    "latest_export_artifact_id": artifact.artifact_id,
+                    "updated_at": _utc_now(),
+                }
+            )
+            self.save_manifest(updated_manifest)
+            return updated_manifest, artifact
+
+    def export_artifacts_response(self, job_id: str) -> dict[str, Any]:
+        manifest = self.get_job(job_id)
+        return {
+            "job_id": manifest.job_id,
+            "export_artifacts": [
+                artifact.model_dump(mode="json") for artifact in manifest.export_artifacts
+            ],
+            "latest_export_artifact_id": manifest.latest_export_artifact_id,
+        }
+
+    def latest_export_response(self, job_id: str) -> dict[str, Any]:
+        manifest = self.get_job(job_id)
+        artifact_id = manifest.latest_export_artifact_id
+        if artifact_id is None:
+            raise export_artifact_not_found_error()
+        artifact = self._find_export_artifact(manifest, artifact_id)
+        artifact_path = self._export_artifact_path(job_id, artifact)
+        if not artifact_path.exists():
+            raise export_artifact_not_found_error()
+        return {
+            "job_id": manifest.job_id,
+            "artifact": artifact.model_dump(mode="json"),
+        }
+
+    def export_download(self, job_id: str, export_id: str) -> tuple[ExportArtifact, Path]:
+        manifest = self.get_job(job_id)
+        artifact = self._find_export_artifact(manifest, export_id)
+        artifact_path = self._export_artifact_path(job_id, artifact)
+        if not artifact_path.exists():
+            raise export_artifact_not_found_error()
+        return artifact, artifact_path
+
     def analysis_artifacts_response(self, job_id: str) -> dict[str, Any]:
         manifest = self.get_job(job_id)
         return {
@@ -723,6 +891,69 @@ class LocalArtifactStore:
             candidate_spec_artifact_id=candidate_spec_artifact_id,
             source_image_artifact_ids=source_image_artifact_ids,
         )
+
+    def _write_export_artifact(
+        self,
+        job_id: str,
+        png_bytes: bytes,
+        candidate_spec_artifact_id: str,
+        render_artifact_id: str,
+        source_image_artifact_ids: dict[ImageRole, str],
+    ) -> ExportArtifact:
+        if not png_bytes:
+            raise _error("STORAGE_WRITE_FAILED", status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        artifact_id = _new_export_artifact_id()
+        relative_path = f"artifacts/exports/{artifact_id}.png"
+        final_path = self._job_root(job_id) / relative_path
+        temp_path = final_path.with_name(f"{artifact_id}.png.tmp")
+
+        try:
+            final_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_path.write_bytes(png_bytes)
+            temp_path.replace(final_path)
+        except OSError as exc:
+            temp_path.unlink(missing_ok=True)
+            raise _error("STORAGE_WRITE_FAILED", status.HTTP_500_INTERNAL_SERVER_ERROR) from exc
+
+        return ExportArtifact(
+            artifact_id=artifact_id,
+            format="png",
+            mime_type="image/png",
+            relative_path=relative_path,
+            size_bytes=len(png_bytes),
+            sha256=hashlib.sha256(png_bytes).hexdigest(),
+            created_at=_utc_now(),
+            candidate_spec_artifact_id=candidate_spec_artifact_id,
+            render_artifact_id=render_artifact_id,
+            source_image_artifact_ids=source_image_artifact_ids,
+        )
+
+    def _find_export_artifact(self, manifest: JobManifest, export_id: str) -> ExportArtifact:
+        artifact = next(
+            (
+                candidate
+                for candidate in manifest.export_artifacts
+                if candidate.artifact_id == export_id
+            ),
+            None,
+        )
+        if artifact is None:
+            raise export_artifact_not_found_error()
+        return artifact
+
+    def _export_artifact_path(self, job_id: str, artifact: ExportArtifact) -> Path:
+        relative_path = Path(artifact.relative_path)
+        if relative_path.is_absolute():
+            raise export_artifact_not_found_error()
+
+        job_root = self._job_root(job_id).resolve()
+        artifact_path = (job_root / relative_path).resolve()
+        try:
+            artifact_path.relative_to(job_root)
+        except ValueError:
+            raise export_artifact_not_found_error() from None
+        return artifact_path
 
     def _job_lock(self, job_id: str) -> Lock:
         key = (str(self.storage_root), job_id)

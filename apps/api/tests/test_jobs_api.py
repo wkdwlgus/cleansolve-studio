@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from cleansolve_api.artifacts import LocalArtifactStore
+from cleansolve_api.artifacts import ExportArtifact, LocalArtifactStore
 from cleansolve_api.main import app
 from cleansolve_api.routes import jobs
 from cleansolve_api.settings import Settings
@@ -293,6 +293,8 @@ def test_old_manifest_json_defaults_analysis_artifact_fields(tmp_path):
     }
     assert manifest.render_artifacts == []
     assert manifest.latest_render_artifact_id is None
+    assert manifest.export_artifacts == []
+    assert manifest.latest_export_artifact_id is None
 
 
 def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
@@ -488,6 +490,163 @@ def test_store_rejects_render_artifact_when_candidate_spec_is_not_latest(tmp_pat
 
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail["code"] == "ANALYSIS_SOURCE_CHANGED"
+
+
+def test_store_saves_and_reads_export_artifact(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    source_ids = {
+        "problem": "img_problem_123",
+        "teacher_solution": "img_teacher_456",
+    }
+    manifest.latest_image_artifact_ids = source_ids
+    manifest.latest_analysis_artifact_ids["candidate_spec"] = "spec_123"
+    manifest.latest_render_artifact_id = "render_123"
+    store.save_manifest(manifest)
+
+    updated, artifact = store.save_export_artifact(
+        job_id=manifest.job_id,
+        png_bytes=b"\x89PNG\r\n\x1a\nexport",
+        candidate_spec_artifact_id="spec_123",
+        render_artifact_id="render_123",
+        source_image_artifact_ids=source_ids,
+    )
+
+    assert artifact.artifact_id.startswith("export_")
+    assert artifact.format == "png"
+    assert artifact.mime_type == "image/png"
+    assert artifact.relative_path == f"artifacts/exports/{artifact.artifact_id}.png"
+    assert artifact.candidate_spec_artifact_id == "spec_123"
+    assert artifact.render_artifact_id == "render_123"
+    assert artifact.source_image_artifact_ids == source_ids
+    assert updated.latest_export_artifact_id == artifact.artifact_id
+    assert len(updated.export_artifacts) == 1
+    assert store.export_artifacts_response(manifest.job_id)["latest_export_artifact_id"] == artifact.artifact_id
+    assert store.latest_export_response(manifest.job_id) == {
+        "job_id": manifest.job_id,
+        "artifact": artifact.model_dump(mode="json"),
+    }
+    download_artifact, download_path = store.export_download(manifest.job_id, artifact.artifact_id)
+    assert download_artifact == artifact
+    assert download_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_store_rejects_export_when_candidate_or_render_or_source_changed(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    latest_source_ids = {
+        "problem": "img_problem_latest",
+        "teacher_solution": "img_teacher_latest",
+    }
+    manifest.latest_image_artifact_ids = latest_source_ids
+    manifest.latest_analysis_artifact_ids["candidate_spec"] = "spec_latest"
+    manifest.latest_render_artifact_id = "render_latest"
+    store.save_manifest(manifest)
+
+    stale_cases = [
+        {
+            "candidate_spec_artifact_id": "spec_stale",
+            "render_artifact_id": "render_latest",
+            "source_image_artifact_ids": latest_source_ids,
+        },
+        {
+            "candidate_spec_artifact_id": "spec_latest",
+            "render_artifact_id": "render_stale",
+            "source_image_artifact_ids": latest_source_ids,
+        },
+        {
+            "candidate_spec_artifact_id": "spec_latest",
+            "render_artifact_id": "render_latest",
+            "source_image_artifact_ids": {
+                "problem": "img_problem_old",
+                "teacher_solution": "img_teacher_latest",
+            },
+        },
+    ]
+
+    for stale_case in stale_cases:
+        with pytest.raises(HTTPException) as exc_info:
+            store.save_export_artifact(
+                job_id=manifest.job_id,
+                png_bytes=b"\x89PNG\r\n\x1a\nexport",
+                **stale_case,
+            )
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail["code"] == "EXPORT_SOURCE_CHANGED"
+
+
+def test_store_latest_export_and_download_return_404_before_export(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+
+    for call in (
+        lambda: store.latest_export_response(manifest.job_id),
+        lambda: store.export_download(manifest.job_id, "export_unknown"),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            call()
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail["code"] == "EXPORT_ARTIFACT_NOT_FOUND"
+
+
+def test_store_rejects_export_download_path_escape_from_corrupt_manifest(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    manifest.export_artifacts = [
+        ExportArtifact(
+            artifact_id="export_escape",
+            format="png",
+            mime_type="image/png",
+            relative_path="../escape.png",
+            size_bytes=1,
+            sha256="a" * 64,
+            created_at="2026-06-17T00:00:00Z",
+            candidate_spec_artifact_id="spec_123",
+            render_artifact_id="render_123",
+            source_image_artifact_ids={
+                "problem": "img_problem_123",
+                "teacher_solution": "img_teacher_456",
+            },
+        )
+    ]
+    manifest.latest_export_artifact_id = "export_escape"
+    store.save_manifest(manifest)
+    (tmp_path / "jobs" / "escape.png").write_bytes(b"\x89PNG\r\n\x1a\nescape")
+
+    for call in (
+        lambda: store.latest_export_response(manifest.job_id),
+        lambda: store.export_download(manifest.job_id, "export_escape"),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            call()
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail["code"] == "EXPORT_ARTIFACT_NOT_FOUND"
+
+
+def test_store_rejects_empty_export_bytes_without_writing_file(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    source_ids = {
+        "problem": "img_problem_123",
+        "teacher_solution": "img_teacher_456",
+    }
+    manifest.latest_image_artifact_ids = source_ids
+    manifest.latest_analysis_artifact_ids["candidate_spec"] = "spec_123"
+    manifest.latest_render_artifact_id = "render_123"
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.save_export_artifact(
+            job_id=manifest.job_id,
+            png_bytes=b"",
+            candidate_spec_artifact_id="spec_123",
+            render_artifact_id="render_123",
+            source_image_artifact_ids=source_ids,
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail["code"] == "STORAGE_WRITE_FAILED"
+    assert not (tmp_path / "jobs" / manifest.job_id / "artifacts" / "exports").exists()
 
 
 def test_store_rejects_analysis_outputs_when_latest_inputs_changed(tmp_path):
@@ -750,3 +909,122 @@ def test_rendered_preview_route_returns_404_before_render():
 
     assert response.status_code == 404
     assert_error(response, "RENDER_ARTIFACT_NOT_FOUND")
+
+
+def run_and_render_job(client: TestClient) -> tuple[str, dict[str, object], dict[str, object]]:
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+    run_payload = client.post(f"/jobs/{job_id}/run").json()
+    render_payload = client.post(f"/jobs/{job_id}/render").json()
+    return job_id, run_payload, render_payload
+
+
+def test_export_route_requires_approved_job():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+
+    response = client.post(f"/jobs/{job_id}/export", json={"format": "png"})
+
+    assert response.status_code == 409
+    assert_error(response, "EXPORT_JOB_NOT_READY")
+
+
+def test_export_route_requires_latest_render_artifact():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+    client.post(f"/jobs/{job_id}/run")
+
+    response = client.post(f"/jobs/{job_id}/export", json={"format": "png"})
+
+    assert response.status_code == 409
+    assert_error(response, "EXPORT_RENDER_NOT_READY")
+
+
+def test_export_route_rejects_unsupported_format():
+    client = TestClient(app)
+    job_id, _, _ = run_and_render_job(client)
+
+    response = client.post(f"/jobs/{job_id}/export", json={"format": "pdf"})
+
+    assert response.status_code == 400
+    assert_error(response, "UNSUPPORTED_EXPORT_FORMAT")
+    assert response.json()["detail"]["fields"] == {
+        "allowed": ["png"],
+        "received": "pdf",
+    }
+
+
+def test_export_route_saves_png_artifact_and_downloads_it():
+    client = TestClient(app)
+    job_id, run_payload, render_payload = run_and_render_job(client)
+
+    response = client.post(f"/jobs/{job_id}/export", json={"format": "png"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    artifact = payload["artifact"]
+    assert artifact["artifact_id"].startswith("export_")
+    assert artifact["format"] == "png"
+    assert artifact["mime_type"] == "image/png"
+    assert artifact["relative_path"] == f"artifacts/exports/{artifact['artifact_id']}.png"
+    assert artifact["candidate_spec_artifact_id"] == run_payload["latest_analysis_artifact_ids"]["candidate_spec"]
+    assert artifact["render_artifact_id"] == render_payload["artifact"]["artifact_id"]
+    assert artifact["source_image_artifact_ids"] == run_payload["latest_image_artifact_ids"]
+    assert payload["latest_export_artifact_id"] == artifact["artifact_id"]
+
+    exports_response = client.get(f"/jobs/{job_id}/exports")
+    latest_response = client.get(f"/jobs/{job_id}/exports/latest")
+    download_response = client.get(f"/jobs/{job_id}/exports/{artifact['artifact_id']}/download")
+
+    assert exports_response.status_code == 200
+    assert exports_response.json()["latest_export_artifact_id"] == artifact["artifact_id"]
+    assert exports_response.json()["export_artifacts"] == [artifact]
+    assert latest_response.status_code == 200
+    assert latest_response.json() == {"job_id": job_id, "artifact": artifact}
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"] == "image/png"
+    assert download_response.headers["content-disposition"] == (
+        f'attachment; filename="{artifact["artifact_id"]}.png"'
+    )
+    assert download_response.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_latest_export_route_returns_404_before_export():
+    client = TestClient(app)
+    job_id, _, _ = run_and_render_job(client)
+
+    response = client.get(f"/jobs/{job_id}/exports/latest")
+
+    assert response.status_code == 404
+    assert_error(response, "EXPORT_ARTIFACT_NOT_FOUND")
+
+
+def test_export_download_returns_404_for_unknown_export_id():
+    client = TestClient(app)
+    job_id, _, _ = run_and_render_job(client)
+
+    response = client.get(f"/jobs/{job_id}/exports/export_unknown/download")
+
+    assert response.status_code == 404
+    assert_error(response, "EXPORT_ARTIFACT_NOT_FOUND")
+
+
+def test_export_route_rejects_stale_render_candidate_spec():
+    client = TestClient(app)
+    job_id, _, _ = run_and_render_job(client)
+    patch_response = client.patch(
+        f"/jobs/{job_id}/spec",
+        json={
+            "client_spec_version": 1,
+            "element_id": "el_freehand_dimension_001",
+            "operation": "update_element",
+            "changes": {"geometry.target_anchor_end": [610, 380]},
+        },
+    )
+
+    response = client.post(f"/jobs/{job_id}/export", json={"format": "png"})
+
+    assert patch_response.status_code == 200
+    assert response.status_code == 409
+    assert_error(response, "EXPORT_RENDER_NOT_READY")

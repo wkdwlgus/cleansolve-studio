@@ -74,6 +74,19 @@ CLEANSOLVE_STORAGE_ROOT=var/jobs
 
 업로드된 원본 이미지는 job artifact로 저장되며 같은 role을 다시 업로드해도 기존 artifact를 덮어쓰지 않습니다. API 응답에는 local absolute path와 원본 파일명을 노출하지 않습니다.
 
+## 로컬 export 흐름
+
+M6 기준 export는 PNG artifact만 지원합니다. PDF export는 명시적으로 보류된 상태이며, `format: "pdf"` 요청은 `UNSUPPORTED_EXPORT_FORMAT` 오류로 거부됩니다.
+
+1. 원본 문제 이미지와 선생님 손풀이 이미지를 업로드합니다.
+2. `POST /jobs/{job_id}/run`으로 candidate spec을 생성하고 승인 상태까지 workflow를 실행합니다.
+3. `POST /jobs/{job_id}/render`로 최신 candidate spec 기반 SVG preview artifact를 만듭니다.
+4. `POST /jobs/{job_id}/export`에 `{ "format": "png" }`를 보내 PNG export artifact를 생성합니다.
+5. `GET /jobs/{job_id}/exports/latest`로 최신 export metadata를 확인합니다.
+6. `GET /jobs/{job_id}/exports/{export_id}/download`로 PNG bytes를 다운로드합니다.
+
+현재 PNG export prototype은 최신 render artifact와 candidate spec artifact를 참조하는 저장, 조회, 다운로드 계약을 검증하기 위한 기반입니다. 원본 이미지와 overlay를 상용 품질로 합성하는 raster compositing은 이후 milestone에서 다룹니다.
+
 ## 로컬 검증
 
 Python 테스트:
