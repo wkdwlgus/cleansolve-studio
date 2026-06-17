@@ -1,16 +1,25 @@
-from fastapi import APIRouter, File, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from cleansolve_api.artifacts import (
     LocalArtifactStore,
     ImageRole,
+    export_job_not_ready_error,
+    export_render_not_ready_error,
+    export_source_changed_error,
+    export_spec_not_ready_error,
     job_response,
     missing_required_images_error,
+    render_artifact_not_found_error,
     spec_not_ready_error,
     spec_patch_rejected_error,
     spec_version_conflict_error,
+    unsupported_export_format_error,
 )
 from cleansolve_api.settings import settings
 from cleansolve_api.spec_patch import SpecPatchRejected, SpecPatchRequest, apply_spec_patch
+from cleansolve_renderer.export_png import render_export_png
 from cleansolve_renderer.overlay import render_overlay_svg
 from cleansolve_spec.models import CandidateSpec
 from cleansolve_spec.validation import validate_candidate_spec
@@ -28,6 +37,10 @@ def _source_image_artifact_ids_from_spec(spec: CandidateSpec) -> dict[ImageRole,
         "problem": spec.source_images["problem_image_id"],
         "teacher_solution": spec.source_images["teacher_solution_image_id"],
     }
+
+
+class ExportRequest(BaseModel):
+    format: str = "png"
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -92,6 +105,105 @@ def run_job(job_id: str) -> dict[str, object]:
         source_image_artifact_ids=source_image_artifact_ids,
     )
     return job_response(updated_manifest)
+
+
+@router.post("/{job_id}/export")
+def export_job(job_id: str, request: ExportRequest | None = None) -> dict[str, object]:
+    resolved_request = request or ExportRequest()
+    if resolved_request.format != "png":
+        raise unsupported_export_format_error(resolved_request.format)
+
+    store = _store()
+    manifest = store.get_job(job_id)
+    if manifest.status != "APPROVED":
+        raise export_job_not_ready_error(manifest.status)
+
+    candidate_spec_artifact_id = manifest.latest_analysis_artifact_ids["candidate_spec"]
+    if candidate_spec_artifact_id is None:
+        raise export_spec_not_ready_error()
+    if manifest.latest_render_artifact_id is None:
+        raise export_render_not_ready_error()
+
+    spec = CandidateSpec.model_validate(
+        store.read_latest_analysis_payload(job_id, "candidate_spec")
+    )
+    expected_source_image_artifact_ids = _source_image_artifact_ids_from_spec(spec)
+    if expected_source_image_artifact_ids != manifest.latest_image_artifact_ids:
+        raise export_source_changed_error(
+            {
+                "source_image_artifact_ids": expected_source_image_artifact_ids,
+                "latest_image_artifact_ids": manifest.latest_image_artifact_ids,
+            }
+        )
+
+    try:
+        _, render_artifact, svg = store.latest_render_artifact(job_id)
+    except HTTPException as exc:
+        if exc.detail == render_artifact_not_found_error().detail:
+            raise export_render_not_ready_error() from exc
+        raise
+
+    if render_artifact.candidate_spec_artifact_id != candidate_spec_artifact_id:
+        raise export_render_not_ready_error(
+            {
+                "render_candidate_spec_artifact_id": render_artifact.candidate_spec_artifact_id,
+                "latest_candidate_spec_artifact_id": candidate_spec_artifact_id,
+            }
+        )
+    if render_artifact.source_image_artifact_ids != manifest.latest_image_artifact_ids:
+        raise export_source_changed_error(
+            {
+                "render_source_image_artifact_ids": render_artifact.source_image_artifact_ids,
+                "latest_image_artifact_ids": manifest.latest_image_artifact_ids,
+            }
+        )
+
+    try:
+        png_bytes = render_export_png(
+            width=spec.page.width,
+            height=spec.page.height,
+            svg=svg,
+            metadata={
+                "CleanSolve-Candidate-Spec-Artifact-ID": candidate_spec_artifact_id,
+                "CleanSolve-Job-ID": job_id,
+                "CleanSolve-Render-Artifact-ID": render_artifact.artifact_id,
+            },
+        )
+    except ValueError as exc:
+        raise export_render_not_ready_error({"reason": str(exc)}) from exc
+
+    updated_manifest, export_artifact = store.save_export_artifact(
+        job_id=job_id,
+        png_bytes=png_bytes,
+        candidate_spec_artifact_id=candidate_spec_artifact_id,
+        render_artifact_id=render_artifact.artifact_id,
+        source_image_artifact_ids=manifest.latest_image_artifact_ids,
+    )
+    return {
+        "job_id": job_id,
+        "artifact": export_artifact.model_dump(mode="json"),
+        "latest_export_artifact_id": updated_manifest.latest_export_artifact_id,
+    }
+
+
+@router.get("/{job_id}/exports")
+def get_exports(job_id: str) -> dict[str, object]:
+    return _store().export_artifacts_response(job_id)
+
+
+@router.get("/{job_id}/exports/latest")
+def get_latest_export(job_id: str) -> dict[str, object]:
+    return _store().latest_export_response(job_id)
+
+
+@router.get("/{job_id}/exports/{export_id}/download")
+def download_export(job_id: str, export_id: str) -> FileResponse:
+    artifact, path = _store().export_download(job_id, export_id)
+    return FileResponse(
+        path,
+        media_type=artifact.mime_type,
+        filename=f"{artifact.artifact_id}.png",
+    )
 
 
 @router.get("/{job_id}")
