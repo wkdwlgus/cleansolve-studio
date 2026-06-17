@@ -181,6 +181,88 @@ select {
   line-height: 1.45;
 }
 
+.edit-panel {
+  width: min(100%, 760px);
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  border: 1px solid #c7d2de;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+}
+
+.selected-review {
+  margin: 0;
+  color: #25324a;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.edit-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.edit-grid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #25324a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.edit-grid input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d9e2ec;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #172033;
+  padding: 8px;
+}
+
+.edit-grid input:focus-visible,
+.save-edit-button:focus-visible,
+.review-list button:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.35);
+  outline-offset: 2px;
+}
+
+.save-edit-button,
+.review-list button {
+  width: fit-content;
+  border: 1px solid #0f766e;
+  border-radius: 6px;
+  background: #0f766e;
+  color: #ffffff;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.save-edit-button:disabled {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.review-list button:disabled {
+  border-color: #cbd5e1;
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.render-summary {
+  margin: 0;
+  color: #0f766e;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .canvas-shell {
   width: min(100%, 760px);
   display: grid;
@@ -357,7 +439,8 @@ select {
   }
 
   .upload-grid,
-  .anchor-controls {
+  .anchor-controls,
+  .edit-grid {
     grid-template-columns: 1fr;
   }
 }

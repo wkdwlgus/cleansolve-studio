@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { getCandidateSpec, loadEditorJob, runUploadToReviewWorkflow } from './client';
+import {
+  getCandidateSpec,
+  getRenderedPreview,
+  loadEditorJob,
+  patchCandidateSpec,
+  renderJobPreview,
+  runUploadToReviewWorkflow
+} from './client';
 
 describe('editor API client', () => {
   it('uploads both images, runs workflow, and loads candidate spec plus review items', async () => {
@@ -137,6 +144,116 @@ describe('editor API client', () => {
       page: { width: 0, height: 0 },
       elements: []
     });
+  });
+
+  it('patches candidate spec with JSON body', async () => {
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
+      calls.push({
+        url,
+        method: init?.method ?? 'GET',
+        body: init?.body ? JSON.parse(init.body as string) : null
+      });
+      return Response.json({
+        job_id: 'job_test',
+        candidate_spec: {
+          job_id: 'job_test',
+          version: 2,
+          page: { width: 1080, height: 1920 },
+          elements: []
+        },
+        validation_report: { report_id: 'report_2', passed: true, issues: [] },
+        candidate_spec_artifact_id: 'spec_2',
+        validation_report_artifact_id: 'report_2',
+        latest_analysis_artifact_ids: {
+          candidate_spec: 'spec_2',
+          validation_report: 'report_2',
+          correction_plan: 'correction_1'
+        }
+      });
+    };
+
+    const response = await patchCandidateSpec(
+      'job_test',
+      {
+        client_spec_version: 1,
+        element_id: 'el_dimension',
+        operation: 'update_element',
+        changes: { 'geometry.target_anchor_end': [610, 380] }
+      },
+      '',
+      fetcher
+    );
+
+    expect(calls).toEqual([
+      {
+        url: '/jobs/job_test/spec',
+        method: 'PATCH',
+        body: {
+          client_spec_version: 1,
+          element_id: 'el_dimension',
+          operation: 'update_element',
+          changes: { 'geometry.target_anchor_end': [610, 380] }
+        }
+      }
+    ]);
+    expect(response.candidate_spec.version).toBe(2);
+  });
+
+  it('renders and reads server SVG previews', async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
+      calls.push({ url, method: init?.method ?? 'GET' });
+      return Response.json({
+        job_id: 'job_test',
+        artifact: {
+          artifact_id: 'render_1',
+          type: 'overlay_svg',
+          relative_path: 'artifacts/renders/render_1.svg',
+          size_bytes: 11,
+          sha256: 'a'.repeat(64),
+          created_at: '2026-06-17T00:00:00Z',
+          candidate_spec_artifact_id: 'spec_2',
+          source_image_artifact_ids: {
+            problem: 'img_problem',
+            teacher_solution: 'img_teacher'
+          }
+        },
+        svg: '<svg></svg>'
+      });
+    };
+
+    await renderJobPreview('job_test', '', fetcher);
+    await getRenderedPreview('job_test', '', fetcher);
+
+    expect(calls).toEqual([
+      { url: '/jobs/job_test/render', method: 'POST' },
+      { url: '/jobs/job_test/rendered-preview', method: 'GET' }
+    ]);
+  });
+
+  it('throws Korean messages for patch and render failures', async () => {
+    const failingFetcher = async (): Promise<Response> => Response.json({ detail: 'bad' }, { status: 400 });
+
+    await expect(
+      patchCandidateSpec(
+        'job_test',
+        {
+          client_spec_version: 1,
+          element_id: 'el_dimension',
+          operation: 'update_element',
+          changes: {}
+        },
+        '',
+        failingFetcher
+      )
+    ).rejects.toThrow('spec 수정사항을 저장하지 못했습니다.');
+    await expect(renderJobPreview('job_test', '', failingFetcher)).rejects.toThrow(
+      '미리보기를 다시 렌더링하지 못했습니다.'
+    );
+    await expect(getRenderedPreview('job_test', '', failingFetcher)).rejects.toThrow(
+      '렌더링된 미리보기를 불러오지 못했습니다.'
+    );
   });
 
   it('creates, runs, and loads visible review items for an editor job', async () => {

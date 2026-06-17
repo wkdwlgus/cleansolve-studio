@@ -47,6 +47,41 @@ export interface CandidateSpecPreview {
   elements: CandidateSpecElement[];
 }
 
+export interface SpecPatchRequest {
+  client_spec_version: number;
+  element_id: string;
+  operation: 'update_element';
+  changes: Record<string, unknown>;
+}
+
+export interface SpecPatchResponse {
+  job_id: string;
+  candidate_spec: CandidateSpecPreview;
+  validation_report: {
+    report_id: string;
+    passed: boolean;
+    issues: Array<Record<string, unknown>>;
+  };
+  candidate_spec_artifact_id: string;
+  validation_report_artifact_id: string;
+  latest_analysis_artifact_ids: Record<string, string | null>;
+}
+
+export interface RenderedPreviewResponse {
+  job_id: string;
+  artifact: {
+    artifact_id: string;
+    type: 'overlay_svg';
+    relative_path: string;
+    size_bytes: number;
+    sha256: string;
+    created_at: string;
+    candidate_spec_artifact_id: string;
+    source_image_artifact_ids: Record<ImageRole, string>;
+  };
+  svg: string;
+}
+
 export interface UploadToReviewInput {
   problemFile: File;
   teacherSolutionFile: File;
@@ -122,6 +157,42 @@ export async function getCandidateSpec(
   const response = await fetcher(`${baseUrl}/jobs/${jobId}/candidate-spec`);
   const payload = await readJson<unknown>(response, '미리보기 정보를 불러오지 못했습니다.');
   return normalizeCandidateSpec(payload, jobId);
+}
+
+export async function patchCandidateSpec(
+  jobId: string,
+  request: SpecPatchRequest,
+  baseUrl = '',
+  fetcher: typeof fetch = fetch
+): Promise<SpecPatchResponse> {
+  const response = await fetcher(`${baseUrl}/jobs/${jobId}/spec`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request)
+  });
+  const payload = await readJson<SpecPatchResponse>(response, 'spec 수정사항을 저장하지 못했습니다.');
+  return {
+    ...payload,
+    candidate_spec: normalizeCandidateSpec(payload.candidate_spec, jobId)
+  };
+}
+
+export async function renderJobPreview(
+  jobId: string,
+  baseUrl = '',
+  fetcher: typeof fetch = fetch
+): Promise<RenderedPreviewResponse> {
+  const response = await fetcher(`${baseUrl}/jobs/${jobId}/render`, { method: 'POST' });
+  return readJson<RenderedPreviewResponse>(response, '미리보기를 다시 렌더링하지 못했습니다.');
+}
+
+export async function getRenderedPreview(
+  jobId: string,
+  baseUrl = '',
+  fetcher: typeof fetch = fetch
+): Promise<RenderedPreviewResponse> {
+  const response = await fetcher(`${baseUrl}/jobs/${jobId}/rendered-preview`);
+  return readJson<RenderedPreviewResponse>(response, '렌더링된 미리보기를 불러오지 못했습니다.');
 }
 
 export async function runUploadToReviewWorkflow(

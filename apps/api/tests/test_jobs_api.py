@@ -291,6 +291,8 @@ def test_old_manifest_json_defaults_analysis_artifact_fields(tmp_path):
         "validation_report": None,
         "correction_plan": None,
     }
+    assert manifest.render_artifacts == []
+    assert manifest.latest_render_artifact_id is None
 
 
 def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
@@ -340,6 +342,152 @@ def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
         assert artifact_path.exists()
         assert artifact.size_bytes == len(artifact_path.read_bytes())
         assert artifact.source_image_artifact_ids == source_ids
+
+
+def test_store_saves_spec_patch_outputs_without_replacing_correction_plan(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    source_ids = {
+        "problem": "img_problem_123",
+        "teacher_solution": "img_teacher_456",
+    }
+    manifest.latest_image_artifact_ids = source_ids
+    store.save_manifest(manifest)
+    initial = store.save_analysis_outputs(
+        job_id=manifest.job_id,
+        status_value="APPROVED",
+        revision_attempts=1,
+        review_items=[],
+        candidate_spec_payload={"job_id": manifest.job_id, "version": 1},
+        validation_report_payload={"report_id": "report_1", "passed": True, "issues": []},
+        correction_plan_payload={
+            "job_id": manifest.job_id,
+            "revision_attempts": 1,
+            "correction_plans": [],
+        },
+        source_image_artifact_ids=source_ids,
+    )
+    initial_correction_id = initial.latest_analysis_artifact_ids["correction_plan"]
+
+    updated = store.save_spec_patch_outputs(
+        job_id=manifest.job_id,
+        candidate_spec_payload={"job_id": manifest.job_id, "version": 2},
+        validation_report_payload={"report_id": "report_2", "passed": True, "issues": []},
+        source_image_artifact_ids=source_ids,
+        expected_candidate_spec_artifact_id=initial.latest_analysis_artifact_ids["candidate_spec"],
+    )
+
+    assert updated.latest_analysis_artifact_ids["candidate_spec"] != initial.latest_analysis_artifact_ids["candidate_spec"]
+    assert updated.latest_analysis_artifact_ids["validation_report"] != initial.latest_analysis_artifact_ids["validation_report"]
+    assert updated.latest_analysis_artifact_ids["correction_plan"] == initial_correction_id
+    assert len(updated.analysis_artifacts["candidate_spec"]) == 2
+    assert len(updated.analysis_artifacts["validation_report"]) == 2
+    assert len(updated.analysis_artifacts["correction_plan"]) == 1
+    assert store.read_latest_analysis_payload(manifest.job_id, "candidate_spec")["version"] == 2
+
+
+def test_store_rejects_spec_patch_outputs_when_latest_inputs_changed(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    manifest.latest_image_artifact_ids = {
+        "problem": "img_problem_new",
+        "teacher_solution": "img_teacher_new",
+    }
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.save_spec_patch_outputs(
+            job_id=manifest.job_id,
+            candidate_spec_payload={"job_id": manifest.job_id, "version": 2},
+            validation_report_payload={"report_id": "report_2", "passed": True, "issues": []},
+            source_image_artifact_ids={
+                "problem": "img_problem_old",
+                "teacher_solution": "img_teacher_old",
+            },
+            expected_candidate_spec_artifact_id=None,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ANALYSIS_SOURCE_CHANGED"
+
+
+def test_store_rejects_spec_patch_outputs_when_candidate_spec_latest_changed(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    source_ids = {
+        "problem": "img_problem_123",
+        "teacher_solution": "img_teacher_456",
+    }
+    manifest.latest_image_artifact_ids = source_ids
+    manifest.latest_analysis_artifact_ids["candidate_spec"] = "spec_latest"
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.save_spec_patch_outputs(
+            job_id=manifest.job_id,
+            candidate_spec_payload={"job_id": manifest.job_id, "version": 2},
+            validation_report_payload={"report_id": "report_2", "passed": True, "issues": []},
+            source_image_artifact_ids=source_ids,
+            expected_candidate_spec_artifact_id="spec_stale",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "SPEC_VERSION_CONFLICT"
+    assert exc_info.value.detail["fields"] == {
+        "expected_candidate_spec_artifact_id": "spec_stale",
+        "latest_candidate_spec_artifact_id": "spec_latest",
+    }
+
+
+def test_store_saves_and_reads_rendered_preview_artifact(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    source_ids = {
+        "problem": "img_problem_123",
+        "teacher_solution": "img_teacher_456",
+    }
+    svg = '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
+
+    updated, artifact = store.save_render_artifact(
+        job_id=manifest.job_id,
+        svg=svg,
+        candidate_spec_artifact_id="spec_123",
+        source_image_artifact_ids=source_ids,
+    )
+    preview = store.rendered_preview_response(manifest.job_id)
+
+    assert artifact.artifact_id.startswith("render_")
+    assert artifact.type == "overlay_svg"
+    assert artifact.candidate_spec_artifact_id == "spec_123"
+    assert artifact.source_image_artifact_ids == source_ids
+    assert updated.latest_render_artifact_id == artifact.artifact_id
+    assert len(updated.render_artifacts) == 1
+    assert preview == {
+        "job_id": manifest.job_id,
+        "artifact": artifact.model_dump(mode="json"),
+        "svg": svg,
+    }
+
+
+def test_store_rejects_render_artifact_when_candidate_spec_is_not_latest(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    manifest.latest_analysis_artifact_ids["candidate_spec"] = "spec_latest"
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.save_render_artifact(
+            job_id=manifest.job_id,
+            svg="<svg></svg>",
+            candidate_spec_artifact_id="spec_stale",
+            source_image_artifact_ids={
+                "problem": "img_problem_123",
+                "teacher_solution": "img_teacher_456",
+            },
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ANALYSIS_SOURCE_CHANGED"
 
 
 def test_store_rejects_analysis_outputs_when_latest_inputs_changed(tmp_path):
@@ -437,3 +585,168 @@ def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads():
     assert correction_response.json()["job_id"] == job_id
     assert correction_response.json()["revision_attempts"] == 1
     assert isinstance(correction_response.json()["correction_plans"], list)
+
+
+def test_patch_spec_route_applies_allowed_change_and_appends_artifacts():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+    run_payload = client.post(f"/jobs/{job_id}/run").json()
+    original_spec_id = run_payload["latest_analysis_artifact_ids"]["candidate_spec"]
+    original_report_id = run_payload["latest_analysis_artifact_ids"]["validation_report"]
+
+    response = client.patch(
+        f"/jobs/{job_id}/spec",
+        json={
+            "client_spec_version": 1,
+            "element_id": "el_freehand_dimension_001",
+            "operation": "update_element",
+            "changes": {"geometry.target_anchor_end": [610, 380]},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    patched_element = next(
+        element
+        for element in payload["candidate_spec"]["elements"]
+        if element["id"] == "el_freehand_dimension_001"
+    )
+    assert payload["candidate_spec"]["version"] == 2
+    assert patched_element["geometry"]["target_anchor_end"] == [610, 380]
+    assert patched_element["revision_history"][-1]["source"] == "user_patch"
+    assert payload["candidate_spec_artifact_id"] != original_spec_id
+    assert payload["validation_report_artifact_id"] != original_report_id
+    assert payload["latest_analysis_artifact_ids"]["correction_plan"] == run_payload[
+        "latest_analysis_artifact_ids"
+    ]["correction_plan"]
+    artifacts = client.get(f"/jobs/{job_id}/artifacts").json()["analysis_artifacts"]
+    assert len(artifacts["candidate_spec"]) == 2
+    assert len(artifacts["validation_report"]) == 2
+    assert len(artifacts["correction_plan"]) == 1
+
+
+def test_patch_spec_route_rejects_stale_client_version():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+    client.post(f"/jobs/{job_id}/run")
+
+    response = client.patch(
+        f"/jobs/{job_id}/spec",
+        json={
+            "client_spec_version": 0,
+            "element_id": "el_freehand_dimension_001",
+            "operation": "update_element",
+            "changes": {"geometry.target_anchor_end": [610, 380]},
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_patch_spec_route_reports_version_conflict_without_changing_latest_spec():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+    client.post(f"/jobs/{job_id}/run")
+    first_patch = client.patch(
+        f"/jobs/{job_id}/spec",
+        json={
+            "client_spec_version": 1,
+            "element_id": "el_freehand_dimension_001",
+            "operation": "update_element",
+            "changes": {"geometry.target_anchor_end": [610, 380]},
+        },
+    )
+    latest_before_conflict = client.get(f"/jobs/{job_id}/candidate-spec").json()
+
+    response = client.patch(
+        f"/jobs/{job_id}/spec",
+        json={
+            "client_spec_version": 1,
+            "element_id": "el_freehand_dimension_001",
+            "operation": "update_element",
+            "changes": {"geometry.target_anchor_end": [620, 390]},
+        },
+    )
+
+    assert first_patch.status_code == 200
+    assert response.status_code == 409
+    assert_error(response, "SPEC_VERSION_CONFLICT")
+    assert response.json()["detail"]["fields"] == {
+        "client_spec_version": 1,
+        "server_spec_version": 2,
+    }
+    assert client.get(f"/jobs/{job_id}/candidate-spec").json() == latest_before_conflict
+
+
+def test_patch_spec_route_rejects_disallowed_path_without_changing_latest_spec():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+    client.post(f"/jobs/{job_id}/run")
+    latest_before_rejection = client.get(f"/jobs/{job_id}/candidate-spec").json()
+
+    response = client.patch(
+        f"/jobs/{job_id}/spec",
+        json={
+            "client_spec_version": 1,
+            "element_id": "el_freehand_dimension_001",
+            "operation": "update_element",
+            "changes": {"geometry.visible_strokes": []},
+        },
+    )
+
+    assert response.status_code == 400
+    assert_error(response, "SPEC_PATCH_REJECTED")
+    assert response.json()["detail"]["fields"]["reason"] == "path_not_allowed"
+    assert client.get(f"/jobs/{job_id}/candidate-spec").json() == latest_before_rejection
+
+
+def test_patch_spec_route_returns_spec_not_ready_before_run():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+
+    response = client.patch(
+        f"/jobs/{job_id}/spec",
+        json={
+            "client_spec_version": 1,
+            "element_id": "el_freehand_dimension_001",
+            "operation": "update_element",
+            "changes": {"geometry.target_anchor_end": [610, 380]},
+        },
+    )
+
+    assert response.status_code == 409
+    assert_error(response, "SPEC_NOT_READY")
+
+
+def test_render_route_saves_svg_artifact_and_rendered_preview_returns_latest():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+    client.post(f"/jobs/{job_id}/run")
+
+    response = client.post(f"/jobs/{job_id}/render")
+    preview_response = client.get(f"/jobs/{job_id}/rendered-preview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["artifact"]["artifact_id"].startswith("render_")
+    assert payload["artifact"]["type"] == "overlay_svg"
+    assert payload["svg"].startswith("<svg ")
+    assert preview_response.status_code == 200
+    assert preview_response.json() == payload
+    job_payload = client.get(f"/jobs/{job_id}").json()
+    assert job_payload["latest_render_artifact_id"] == payload["artifact"]["artifact_id"]
+
+
+def test_rendered_preview_route_returns_404_before_render():
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+
+    response = client.get(f"/jobs/{job_id}/rendered-preview")
+
+    assert response.status_code == 404
+    assert_error(response, "RENDER_ARTIFACT_NOT_FOUND")
