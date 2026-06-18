@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
   "fastapi",
   "langgraph",
+  "openai",
   "pydantic",
   "pytest",
   "python-multipart",

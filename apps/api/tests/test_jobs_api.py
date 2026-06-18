@@ -237,6 +237,41 @@ def test_settings_load_apps_api_env_file(monkeypatch, tmp_path):
     assert settings.storage_root == Path("var/env-file-jobs")
 
 
+def test_settings_default_to_mock_analysis_client(monkeypatch):
+    monkeypatch.delenv("CLEANSOLVE_ANALYSIS_CLIENT", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL_ANALYSIS", raising=False)
+    monkeypatch.delenv("OPENAI_ANALYSIS_IMAGE_DETAIL", raising=False)
+    monkeypatch.delenv("OPENAI_ANALYSIS_TIMEOUT_SECONDS", raising=False)
+
+    settings = Settings()
+
+    assert settings.analysis_client == "mock"
+    assert settings.openai_model_analysis == "gpt-5.5"
+    assert settings.openai_analysis_image_detail == "auto"
+    assert settings.openai_analysis_timeout_seconds == 60
+
+
+def test_settings_reject_invalid_analysis_client(monkeypatch):
+    monkeypatch.setenv("CLEANSOLVE_ANALYSIS_CLIENT", "invalid")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_settings_reject_non_integer_openai_timeout(monkeypatch):
+    monkeypatch.setenv("OPENAI_ANALYSIS_TIMEOUT_SECONDS", "abc")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_settings_reject_non_positive_openai_timeout(monkeypatch):
+    monkeypatch.setenv("OPENAI_ANALYSIS_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_manifest_store_rejects_invalid_workflow_status(tmp_path):
     store = LocalArtifactStore(tmp_path / "jobs")
     manifest = store.create_job()
