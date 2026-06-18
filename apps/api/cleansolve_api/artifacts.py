@@ -44,6 +44,7 @@ ANALYSIS_ARTIFACT_DIRECTORIES: dict[AnalysisArtifactType, str] = {
 ERROR_MESSAGES = {
     "JOB_NOT_FOUND": "작업을 찾을 수 없습니다.",
     "ANALYSIS_ARTIFACT_NOT_FOUND": "분석 artifact를 찾을 수 없습니다.",
+    "ANALYSIS_ADAPTER_FAILED": "analysis adapter 실행에 실패했습니다.",
     "ANALYSIS_SOURCE_CHANGED": "분석 실행 중 입력 이미지가 변경되었습니다.",
     "UNSUPPORTED_IMAGE_TYPE": "지원하지 않는 이미지 형식입니다.",
     "INVALID_IMAGE_BYTES": "이미지 파일 내용이 MIME 형식과 일치하지 않습니다.",
@@ -191,6 +192,14 @@ def analysis_artifact_not_found_error(artifact_type: AnalysisArtifactType) -> HT
         "ANALYSIS_ARTIFACT_NOT_FOUND",
         status.HTTP_404_NOT_FOUND,
         {"artifact_type": artifact_type},
+    )
+
+
+def analysis_adapter_failed_error(client: str, reason: str) -> HTTPException:
+    return _error(
+        "ANALYSIS_ADAPTER_FAILED",
+        status.HTTP_502_BAD_GATEWAY,
+        {"client": client, "reason": reason},
     )
 
 
@@ -369,6 +378,34 @@ class LocalArtifactStore:
                     "status": status_value,
                     "revision_attempts": revision_attempts,
                     "review_items": review_items,
+                    "updated_at": _utc_now(),
+                }
+            )
+            self.save_manifest(updated_manifest)
+            return updated_manifest
+
+    def save_failed_analysis_run(
+        self,
+        job_id: str,
+        *,
+        client: str,
+        reason: str,
+    ) -> JobManifest:
+        _validate_job_id(job_id)
+        with self._job_lock(job_id):
+            manifest = self.get_job(job_id)
+            failed_item = {
+                "type": "analysis_adapter_failed",
+                "client": client,
+                "retryable": True,
+                "review_reason": None,
+                "safe_reason": reason,
+            }
+            updated_manifest = JobManifest.model_validate(
+                {
+                    **manifest.model_dump(mode="python"),
+                    "status": "FAILED",
+                    "review_items": [*manifest.review_items, failed_item],
                     "updated_at": _utc_now(),
                 }
             )
@@ -723,6 +760,31 @@ class LocalArtifactStore:
         if not artifact_path.exists():
             raise analysis_artifact_not_found_error(artifact_type)
         return json.loads(artifact_path.read_text(encoding="utf-8"))
+
+    def latest_image_artifact_paths(self, job_id: str) -> dict[ImageRole, Path]:
+        manifest = self.get_job(job_id)
+        paths: dict[ImageRole, Path] = {}
+        job_root = self._job_root(job_id).resolve()
+        for role, artifact_id in manifest.latest_image_artifact_ids.items():
+            if artifact_id is None:
+                continue
+            artifact = next(
+                (
+                    candidate
+                    for candidate in manifest.image_artifacts[role]
+                    if candidate.artifact_id == artifact_id
+                ),
+                None,
+            )
+            if artifact is None:
+                raise job_not_found_error(job_id)
+            path = (self._job_root(job_id) / artifact.relative_path).resolve()
+            try:
+                path.relative_to(job_root)
+            except ValueError:
+                raise job_not_found_error(job_id) from None
+            paths[role] = path
+        return paths
 
     async def save_image(
         self,

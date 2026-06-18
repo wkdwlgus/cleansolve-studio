@@ -58,6 +58,13 @@ def run_mock_workflow(
     job_id: str,
     *,
     source_image_artifact_ids: dict[str, str | None] | None = None,
+    source_image_paths: dict[str, str] | None = None,
+    analysis_client_kind: str = "mock",
+    openai_api_key: str | None = None,
+    openai_model_analysis: str = "gpt-5.5",
+    openai_analysis_image_detail: str = "auto",
+    openai_analysis_timeout_seconds: int = 60,
+    analysis_client_override=None,
     max_revision_attempts: int = 2,
     candidate_spec_override=None,
     correction_patch_override: dict[str, object] | None = None,
@@ -73,6 +80,11 @@ def run_mock_workflow(
         "max_revision_attempts": max_revision_attempts,
         "review_items": [],
         "inspection_issue": None,
+        "analysis_client_kind": analysis_client_kind,
+        "openai_api_key": openai_api_key,
+        "openai_model_analysis": openai_model_analysis,
+        "openai_analysis_image_detail": openai_analysis_image_detail,
+        "openai_analysis_timeout_seconds": openai_analysis_timeout_seconds,
     }
     if candidate_spec_override is not None:
         initial_state["candidate_spec"] = candidate_spec_override
@@ -80,6 +92,10 @@ def run_mock_workflow(
         initial_state["correction_patch_override"] = correction_patch_override
     if source_image_artifact_ids is not None:
         initial_state["source_image_artifact_ids"] = source_image_artifact_ids
+    if source_image_paths is not None:
+        initial_state["source_image_paths"] = source_image_paths
+    if analysis_client_override is not None:
+        initial_state["analysis_client_override"] = analysis_client_override
 
     return app.invoke(initial_state)
 

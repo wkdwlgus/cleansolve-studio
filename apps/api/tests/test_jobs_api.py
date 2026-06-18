@@ -73,6 +73,31 @@ def test_create_job_and_run_mock_workflow_after_required_images_uploaded():
     assert run_response.json()["revision_attempts"] == 1
 
 
+def test_run_with_openai_without_key_returns_502_and_marks_job_failed(monkeypatch):
+    monkeypatch.setattr(jobs.settings, "analysis_client", "openai")
+    monkeypatch.setattr(jobs.settings, "openai_api_key", None)
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    response = client.post(f"/jobs/{job_id}/run")
+    job_response_payload = client.get(f"/jobs/{job_id}").json()
+    review_items_payload = client.get(f"/jobs/{job_id}/review-items").json()
+
+    assert response.status_code == 502
+    assert_error(response, "ANALYSIS_ADAPTER_FAILED")
+    assert response.json()["detail"]["fields"] == {
+        "client": "openai",
+        "reason": "configuration_error",
+    }
+    assert job_response_payload["status"] == "FAILED"
+    assert job_response_payload["review_items"][-1]["type"] == "analysis_adapter_failed"
+    assert job_response_payload["review_items"][-1]["retryable"] is True
+    assert review_items_payload == {"items": []}
+    assert "jobs" not in str(response.json())
+    assert "sk-" not in str(response.json())
+
+
 def test_run_requires_required_images_with_structured_error():
     client = TestClient(app)
 
