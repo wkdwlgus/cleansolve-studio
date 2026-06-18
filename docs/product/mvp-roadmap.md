@@ -25,12 +25,12 @@
 | Deterministic renderer | Done | M3 MVP primitive SVG overlay와 source image metadata 보존 지원 |
 | Mock AI adapter | Done | fixture 기반 candidate spec 생성 경로가 있음 |
 | Workflow orchestrator | Partial | LangGraph self-revision prototype이 있으나 실제 image ingestion/artifact 상태와는 아직 느슨함 |
-| FastAPI job API | Partial | job 생성, 이미지 upload/artifact 저장, run precondition, review item shell이 있음 |
+| FastAPI job API | Partial | job 생성, 이미지 upload/artifact 저장, run, spec patch, render, export 기반 endpoint가 있음 |
 | Web editor shell | Done | 이미지 업로드, workflow 실행, candidate spec preview, review panel 표시 흐름이 있음 |
 | HITL policy | Partial | `requires_human_review=true` 필터와 review budget은 구현됨 |
-| Spec patch 저장 | Not Started | 사용자의 수정사항을 server-side patch로 저장하는 API가 없음 |
-| Re-render after patch | Not Started | patch 이후 deterministic re-render API/상태 갱신이 없음 |
-| Export | Not Started | PNG/PDF export endpoint와 artifact 저장이 없음 |
+| Spec patch 저장 | Done | 제한된 server-side spec patch API와 revision history 저장이 구현됨 |
+| Re-render after patch | Done | patch 이후 deterministic SVG render artifact 생성/조회 API가 구현됨 |
+| Export | Done | PNG export foundation, artifact 저장/조회/download API가 구현됨. PDF는 M6에서 명시적으로 보류함 |
 | Real OpenAI adapter | Not Started | mock adapter는 있으나 실제 OpenAI 호출 경로는 아직 없음 |
 | E2E harness | Partial | upload-to-analysis fixture 경로는 완료됐으나 upload-to-export end-to-end 검증은 아직 없음 |
 
@@ -186,7 +186,11 @@
 
 ### M5. Spec Patch & Deterministic Re-render
 
-상태: Not Started
+상태: Done
+
+상세 설계: [M5 Spec Patch & Deterministic Re-render 상세 설계](../superpowers/specs/2026-06-17-spec-patch-rerender-design.md)
+
+구현 결과: 제한된 candidate spec patch API, patch validation, revision history 저장, deterministic SVG render artifact 생성/조회 API가 구현됨. 웹 editor는 지원되는 draft 변경을 server patch로 저장하고 최신 preview를 다시 조회할 수 있음.
 
 목표:
 
@@ -210,7 +214,11 @@
 
 ### M6. Export Foundation
 
-상태: Not Started
+상태: Done
+
+상세 설계: [M6 Export Foundation 상세 설계](../superpowers/specs/2026-06-17-export-foundation-design.md)
+
+구현 결과: 승인된 job의 최신 candidate spec과 최신 render artifact를 참조해 PNG export artifact를 생성, 저장, 조회, 다운로드하는 기반이 구현됨. PDF export와 상용 품질 raster compositing은 후속 milestone으로 보류됨.
 
 목표:
 
@@ -226,8 +234,8 @@
 
 완료 기준:
 
-- approved 또는 review-resolved job에서 export artifact를 만들 수 있다.
-- export 결과는 원본 image artifact와 overlay artifact를 참조한다.
+- `APPROVED` job에서 PNG export artifact를 만들 수 있다.
+- export 결과는 최신 source image artifact, 최신 candidate spec artifact, 최신 render artifact를 참조한다.
 - export 실패가 job state와 artifact를 손상시키지 않는다.
 - fixture 기반 export smoke test가 통과한다.
 
@@ -294,9 +302,9 @@
 | 8 | needs_review 내부 검증 관리 | Partial | M2, M8 |
 | 9 | requires_human_review만 사용자 노출 | Done | M4 |
 | 10 | element type별 허용된 수정 방식 | Partial | M4, M5 |
-| 11 | 수정사항 spec patch 저장 | Not Started | M5 |
-| 12 | 수정 후 deterministic re-render | Not Started | M5 |
-| 13 | 최종 이미지 export | Not Started | M6 |
+| 11 | 수정사항 spec patch 저장 | Done | M5 |
+| 12 | 수정 후 deterministic re-render | Done | M5 |
+| 13 | 최종 이미지 export | Partial | M6, M8 |
 | 14 | 최소 fixture harness 통과 | Partial | M8 |
 | 15 | freehand-style 치수선 표현 | Done | M0, M3 |
 | 16 | target anchor와 visible stroke 분리 저장 | Done | M0, M3 |
@@ -332,10 +340,10 @@
 
 ## 다음 추천 작업
 
-다음 구현 작업은 `M2. Candidate Spec Pipeline`이 가장 적합하다.
+다음 구현 작업은 `M7. OpenAI Adapter Integration`이 가장 적합하다.
 
 이유:
 
-- M1에서 저장한 source image artifact를 다음 pipeline 입력으로 연결해야 한다.
-- candidate spec, validation report, correction input을 artifact로 저장해야 이후 preview, HITL, export 흐름을 붙일 수 있다.
-- 실제 OpenAI adapter 없이도 mock 기반 E2E 경로를 먼저 안정화할 수 있다.
+- M1부터 M6까지 mock 기반 upload, spec, render, patch, export foundation이 main에 반영되어 있다.
+- 이제 SoT의 OpenAI API 사용 원칙에 맞춰 mock adapter와 같은 계약을 유지하는 real adapter 경로를 붙일 차례다.
+- API key가 없어도 기본 테스트가 통과하고, key가 있을 때만 선택적 smoke test를 실행하는 구조를 먼저 고정해야 한다.
