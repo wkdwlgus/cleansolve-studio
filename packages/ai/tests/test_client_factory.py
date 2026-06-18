@@ -14,7 +14,13 @@ def test_build_analysis_client_returns_mock_by_default_contract():
     assert isinstance(client, MockAnalysisClient)
 
 
-def test_build_analysis_client_returns_openai_when_key_is_present():
+def test_build_analysis_client_returns_openai_when_key_is_present(monkeypatch):
+    monkeypatch.setattr(
+        OpenAIAnalysisClient,
+        "_build_client",
+        staticmethod(lambda api_key, timeout_seconds: object()),
+    )
+
     client = build_analysis_client(
         client_kind="openai",
         openai_api_key="sk-test",
