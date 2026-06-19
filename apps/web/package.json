@@ -10,6 +10,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "pretest:e2e": "playwright install chromium",
     "test:e2e": "playwright test"
   },
   "dependencies": {
