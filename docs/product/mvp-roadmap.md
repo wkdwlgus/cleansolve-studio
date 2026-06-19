@@ -31,7 +31,7 @@
 | Spec patch 저장 | Done | 제한된 server-side spec patch API와 revision history 저장이 구현됨 |
 | Re-render after patch | Done | patch 이후 deterministic SVG render artifact 생성/조회 API가 구현됨 |
 | Export | Done | PNG export foundation, artifact 저장/조회/download API가 구현됨. PDF는 M6에서 명시적으로 보류함 |
-| Real OpenAI adapter | Not Started | mock adapter는 있으나 실제 OpenAI 호출 경로는 아직 없음 |
+| Real OpenAI adapter | Done | 선택형 `mock|openai` analysis adapter와 opt-in smoke test가 구현됨 |
 | E2E harness | Partial | upload-to-analysis fixture 경로는 완료됐으나 upload-to-export end-to-end 검증은 아직 없음 |
 
 ## Milestone
@@ -241,7 +241,11 @@
 
 ### M7. OpenAI Adapter Integration
 
-상태: Not Started
+상태: Done
+
+상세 설계: [M7 OpenAI Adapter Integration 상세 설계](../superpowers/specs/2026-06-18-openai-adapter-integration-design.md)
+
+구현 결과: `CLEANSOLVE_ANALYSIS_CLIENT=mock|openai` 선택형 analysis adapter, OpenAI Responses API 기반 candidate spec 생성 경로, Structured Outputs payload, safe failure persistence, opt-in smoke test가 구현됨.
 
 목표:
 
@@ -340,10 +344,10 @@
 
 ## 다음 추천 작업
 
-다음 구현 작업은 `M7. OpenAI Adapter Integration`이 가장 적합하다.
+다음 구현 작업은 `M8. MVP E2E Harness & Release Checklist`가 가장 적합하다.
 
 이유:
 
-- M1부터 M6까지 mock 기반 upload, spec, render, patch, export foundation이 main에 반영되어 있다.
-- 이제 SoT의 OpenAI API 사용 원칙에 맞춰 mock adapter와 같은 계약을 유지하는 real adapter 경로를 붙일 차례다.
-- API key가 없어도 기본 테스트가 통과하고, key가 있을 때만 선택적 smoke test를 실행하는 구조를 먼저 고정해야 한다.
+- M1부터 M7까지 upload, spec, render, patch, export foundation, OpenAI adapter opt-in 경로가 main에 반영될 준비가 됐다.
+- 이제 fixture 기준 upload-to-export end-to-end harness로 MVP 경로 전체를 검증해야 한다.
+- SoT 성공 기준 22개를 pass/partial/fail로 정리해 실제 MVP release 판단 근거를 만들어야 한다.

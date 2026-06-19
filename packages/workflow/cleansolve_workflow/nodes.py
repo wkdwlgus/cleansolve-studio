@@ -1,6 +1,7 @@
 from copy import deepcopy
+from pathlib import Path
 
-from cleansolve_ai.mock_client import MockAnalysisClient
+from cleansolve_ai import AnalysisClient, build_analysis_client
 from cleansolve_renderer.overlay import render_overlay_svg
 from cleansolve_spec.validation import validate_candidate_spec, visible_review_items
 
@@ -22,10 +23,14 @@ def load_style_preset(state: WorkflowState) -> WorkflowState:
 def analyze_sources(state: WorkflowState) -> WorkflowState:
     if "candidate_spec" not in state:
         source_ids = state.get("source_image_artifact_ids") or {}
-        state["candidate_spec"] = MockAnalysisClient().extract_candidate_spec(
+        source_paths = state.get("source_image_paths") or {}
+        client = _analysis_client_from_state(state)
+        state["candidate_spec"] = client.extract_candidate_spec(
             state["job_id"],
             problem_image_artifact_id=source_ids.get("problem"),
             teacher_solution_image_artifact_id=source_ids.get("teacher_solution"),
+            problem_image_path=_optional_path(source_paths.get("problem")),
+            teacher_solution_image_path=_optional_path(source_paths.get("teacher_solution")),
         )
     _set_status(state, "SPEC_EXTRACTED")
     return state
@@ -154,6 +159,23 @@ def _dimension_endpoint_issue(actual_endpoint) -> dict[str, object]:
         "auto_correctable": True,
         "correction_action": "patch_candidate_spec_geometry",
     }
+
+
+def _analysis_client_from_state(state: WorkflowState) -> AnalysisClient:
+    override = state.get("analysis_client_override")
+    if override is not None:
+        return override
+    return build_analysis_client(
+        client_kind=state.get("analysis_client_kind", "mock"),
+        openai_api_key=state.get("openai_api_key"),
+        openai_model_analysis=state.get("openai_model_analysis", "gpt-5.5"),
+        openai_analysis_image_detail=state.get("openai_analysis_image_detail", "auto"),
+        openai_analysis_timeout_seconds=state.get("openai_analysis_timeout_seconds", 60),
+    )
+
+
+def _optional_path(value: str | None) -> Path | None:
+    return Path(value) if value is not None else None
 
 
 def _set_status(state: WorkflowState, status: str) -> None:

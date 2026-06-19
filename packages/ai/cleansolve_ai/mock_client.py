@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from cleansolve_spec.models import CandidateSpec, Element, Evidence, Page, Region, StylePreset
 
 
@@ -8,6 +10,8 @@ class MockAnalysisClient:
         *,
         problem_image_artifact_id: str | None = None,
         teacher_solution_image_artifact_id: str | None = None,
+        problem_image_path: Path | None = None,
+        teacher_solution_image_path: Path | None = None,
     ) -> CandidateSpec:
         return CandidateSpec(
             job_id=job_id,

@@ -16,3 +16,10 @@ class WorkflowState(TypedDict, total=False):
     status_history: list[str]
     correction_patch_override: dict[str, Any]
     source_image_artifact_ids: NotRequired[dict[str, str | None]]
+    source_image_paths: NotRequired[dict[str, str]]
+    analysis_client_kind: str
+    openai_api_key: str | None
+    openai_model_analysis: str
+    openai_analysis_image_detail: str
+    openai_analysis_timeout_seconds: int
+    analysis_client_override: object

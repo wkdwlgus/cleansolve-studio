@@ -2,9 +2,11 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from cleansolve_ai import OpenAIAdapterError, OpenAIConfigurationError
 from cleansolve_api.artifacts import (
     LocalArtifactStore,
     ImageRole,
+    analysis_adapter_failed_error,
     export_job_not_ready_error,
     export_render_not_ready_error,
     export_source_changed_error,
@@ -37,6 +39,12 @@ def _source_image_artifact_ids_from_spec(spec: CandidateSpec) -> dict[ImageRole,
         "problem": spec.source_images["problem_image_id"],
         "teacher_solution": spec.source_images["teacher_solution_image_id"],
     }
+
+
+def _safe_adapter_reason(exc: OpenAIAdapterError) -> str:
+    if isinstance(exc, OpenAIConfigurationError):
+        return "configuration_error"
+    return "response_error"
 
 
 class ExportRequest(BaseModel):
@@ -86,10 +94,29 @@ def run_job(job_id: str) -> dict[str, object]:
         "problem": manifest.latest_image_artifact_ids["problem"],
         "teacher_solution": manifest.latest_image_artifact_ids["teacher_solution"],
     }
-    state = run_mock_workflow(
-        job_id=job_id,
-        source_image_artifact_ids=source_image_artifact_ids,
-    )
+    source_image_paths = {
+        role: str(path)
+        for role, path in store.latest_image_artifact_paths(job_id).items()
+    }
+    try:
+        state = run_mock_workflow(
+            job_id=job_id,
+            source_image_artifact_ids=source_image_artifact_ids,
+            source_image_paths=source_image_paths,
+            analysis_client_kind=settings.analysis_client,
+            openai_api_key=settings.openai_api_key,
+            openai_model_analysis=settings.openai_model_analysis,
+            openai_analysis_image_detail=settings.openai_analysis_image_detail,
+            openai_analysis_timeout_seconds=settings.openai_analysis_timeout_seconds,
+        )
+    except OpenAIAdapterError as exc:
+        reason = _safe_adapter_reason(exc)
+        store.save_failed_analysis_run(
+            job_id,
+            client=settings.analysis_client,
+            reason=reason,
+        )
+        raise analysis_adapter_failed_error(settings.analysis_client, reason) from exc
     updated_manifest = store.save_analysis_outputs(
         job_id=job_id,
         status_value=state["status"],

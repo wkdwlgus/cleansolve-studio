@@ -73,6 +73,80 @@ def test_create_job_and_run_mock_workflow_after_required_images_uploaded():
     assert run_response.json()["revision_attempts"] == 1
 
 
+def test_run_with_openai_without_key_returns_502_and_marks_job_failed(monkeypatch):
+    monkeypatch.setattr(jobs.settings, "analysis_client", "openai")
+    monkeypatch.setattr(jobs.settings, "openai_api_key", None)
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    response = client.post(f"/jobs/{job_id}/run")
+    job_response_payload = client.get(f"/jobs/{job_id}").json()
+    review_items_payload = client.get(f"/jobs/{job_id}/review-items").json()
+
+    assert response.status_code == 502
+    assert_error(response, "ANALYSIS_ADAPTER_FAILED")
+    assert response.json()["detail"]["fields"] == {
+        "client": "openai",
+        "reason": "configuration_error",
+    }
+    assert job_response_payload["status"] == "FAILED"
+    assert job_response_payload["review_items"][-1]["type"] == "analysis_adapter_failed"
+    assert job_response_payload["review_items"][-1]["retryable"] is True
+    assert review_items_payload == {"items": []}
+    assert "jobs" not in str(response.json())
+    assert "sk-" not in str(response.json())
+
+
+def test_run_with_openai_sdk_failure_returns_502_without_analysis_artifacts(monkeypatch):
+    class FailingResponses:
+        def create(self, **kwargs):
+            raise RuntimeError("401 sk-secret /private/tmp/problem.png")
+
+    class FailingOpenAIClient:
+        responses = FailingResponses()
+
+    def build_failing_client(api_key: str, timeout_seconds: int) -> object:
+        return FailingOpenAIClient()
+
+    monkeypatch.setattr(jobs.settings, "analysis_client", "openai")
+    monkeypatch.setattr(jobs.settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(
+        "cleansolve_ai.openai_client.OpenAIAnalysisClient._build_client",
+        staticmethod(build_failing_client),
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    response = client.post(f"/jobs/{job_id}/run")
+    job_response_payload = client.get(f"/jobs/{job_id}").json()
+    review_items_payload = client.get(f"/jobs/{job_id}/review-items").json()
+
+    assert response.status_code == 502
+    assert_error(response, "ANALYSIS_ADAPTER_FAILED")
+    assert response.json()["detail"]["fields"] == {
+        "client": "openai",
+        "reason": "response_error",
+    }
+    assert job_response_payload["status"] == "FAILED"
+    assert job_response_payload["review_items"][-1]["type"] == "analysis_adapter_failed"
+    assert job_response_payload["review_items"][-1]["retryable"] is True
+    assert review_items_payload == {"items": []}
+    assert job_response_payload["analysis_artifacts"] == {
+        "candidate_spec": [],
+        "validation_report": [],
+        "correction_plan": [],
+    }
+    assert job_response_payload["latest_analysis_artifact_ids"] == {
+        "candidate_spec": None,
+        "validation_report": None,
+        "correction_plan": None,
+    }
+    assert "sk-" not in str(response.json())
+    assert "private" not in str(response.json())
+
+
 def test_run_requires_required_images_with_structured_error():
     client = TestClient(app)
 
@@ -235,6 +309,41 @@ def test_settings_load_apps_api_env_file(monkeypatch, tmp_path):
     assert settings.openai_api_key == "sk-from-env-file"
     assert settings.openai_model_analysis == "gpt-analysis-file"
     assert settings.storage_root == Path("var/env-file-jobs")
+
+
+def test_settings_default_to_mock_analysis_client(monkeypatch):
+    monkeypatch.delenv("CLEANSOLVE_ANALYSIS_CLIENT", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL_ANALYSIS", raising=False)
+    monkeypatch.delenv("OPENAI_ANALYSIS_IMAGE_DETAIL", raising=False)
+    monkeypatch.delenv("OPENAI_ANALYSIS_TIMEOUT_SECONDS", raising=False)
+
+    settings = Settings()
+
+    assert settings.analysis_client == "mock"
+    assert settings.openai_model_analysis == "gpt-5.5"
+    assert settings.openai_analysis_image_detail == "auto"
+    assert settings.openai_analysis_timeout_seconds == 60
+
+
+def test_settings_reject_invalid_analysis_client(monkeypatch):
+    monkeypatch.setenv("CLEANSOLVE_ANALYSIS_CLIENT", "invalid")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_settings_reject_non_integer_openai_timeout(monkeypatch):
+    monkeypatch.setenv("OPENAI_ANALYSIS_TIMEOUT_SECONDS", "abc")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_settings_reject_non_positive_openai_timeout(monkeypatch):
+    monkeypatch.setenv("OPENAI_ANALYSIS_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(ValidationError):
+        Settings()
 
 
 def test_manifest_store_rejects_invalid_workflow_status(tmp_path):
