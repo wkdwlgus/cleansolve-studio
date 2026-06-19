@@ -49,6 +49,15 @@ class FalsyFakeOpenAIClient(FakeOpenAIClient):
         return False
 
 
+class FailingResponses:
+    def create(self, **kwargs):
+        raise RuntimeError("401 sk-secret /private/tmp/problem.png")
+
+
+class FailingOpenAIClient:
+    responses = FailingResponses()
+
+
 def candidate_payload(job_id: str = "job_openai") -> dict[str, object]:
     return {
         "job_id": job_id,
@@ -272,6 +281,29 @@ def test_openai_schema_does_not_allow_arbitrary_properties():
     )
 
 
+def test_openai_schema_requires_all_declared_object_properties():
+    def collect_missing_required(schema: object, path: str = "$") -> list[str]:
+        if isinstance(schema, dict):
+            matches = []
+            properties = schema.get("properties")
+            if schema.get("type") == "object" and isinstance(properties, dict):
+                required = set(schema.get("required", []))
+                missing = set(properties) - required
+                if missing:
+                    matches.append(f"{path}: {sorted(missing)}")
+            for key, value in schema.items():
+                matches.extend(collect_missing_required(value, f"{path}.{key}"))
+            return matches
+        if isinstance(schema, list):
+            matches = []
+            for index, value in enumerate(schema):
+                matches.extend(collect_missing_required(value, f"{path}[{index}]"))
+            return matches
+        return []
+
+    assert collect_missing_required(CANDIDATE_SPEC_RESPONSE_SCHEMA) == []
+
+
 def test_openai_schema_allows_renderable_dimension_marker_contract():
     element_schema = CANDIDATE_SPEC_RESPONSE_SCHEMA["properties"]["elements"]["items"]
     element_properties = element_schema["properties"]
@@ -314,6 +346,29 @@ def test_extract_candidate_spec_accepts_dimension_marker_payload(tmp_path):
     assert element.type == "freehand_dimension_marker"
     assert element.geometry["target_anchor_end"] == [120, 40]
     assert element.geometry["visible_strokes"][0]["stroke_id"] == "stroke_001"
+
+
+def test_extract_candidate_spec_wraps_sdk_errors_without_sensitive_message(tmp_path):
+    problem, teacher = write_images(tmp_path)
+    client = OpenAIAnalysisClient(
+        api_key="sk-test",
+        model="gpt-5.5",
+        client=FailingOpenAIClient(),
+    )
+
+    with pytest.raises(OpenAIResponseError) as exc_info:
+        client.extract_candidate_spec(
+            "job_openai",
+            problem_image_artifact_id="img_problem_123",
+            teacher_solution_image_artifact_id="img_teacher_456",
+            problem_image_path=problem,
+            teacher_solution_image_path=teacher,
+        )
+
+    message = str(exc_info.value)
+    assert message == "OpenAI analysis request failed"
+    assert "sk-" not in message
+    assert str(problem) not in message
 
 
 def test_extract_candidate_spec_parses_top_level_dict_output_text(tmp_path):

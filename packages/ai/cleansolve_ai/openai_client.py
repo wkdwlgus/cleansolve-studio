@@ -5,7 +5,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from cleansolve_ai.errors import OpenAIConfigurationError, OpenAIResponseError
+from cleansolve_ai.errors import (
+    OpenAIAdapterError,
+    OpenAIConfigurationError,
+    OpenAIResponseError,
+)
 from cleansolve_ai.openai_schema import CANDIDATE_SPEC_RESPONSE_SCHEMA
 from cleansolve_ai.prompts import ANALYSIS_DEVELOPER_PROMPT, build_analysis_user_prompt
 from cleansolve_spec.models import CandidateSpec
@@ -68,39 +72,46 @@ class OpenAIAnalysisClient:
             problem_image_artifact_id=problem_image_artifact_id,
             teacher_solution_image_artifact_id=teacher_solution_image_artifact_id,
         )
-        response = self._client.responses.create(
-            model=self._model,
-            input=[
-                {
-                    "role": "developer",
-                    "content": [{"type": "input_text", "text": ANALYSIS_DEVELOPER_PROMPT}],
+        try:
+            response = self._client.responses.create(
+                model=self._model,
+                input=[
+                    {
+                        "role": "developer",
+                        "content": [
+                            {"type": "input_text", "text": ANALYSIS_DEVELOPER_PROMPT}
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": user_prompt},
+                            {
+                                "type": "input_image",
+                                "image_url": _image_data_url(problem_image_path),
+                                "detail": self._image_detail,
+                            },
+                            {
+                                "type": "input_image",
+                                "image_url": _image_data_url(teacher_solution_image_path),
+                                "detail": self._image_detail,
+                            },
+                        ],
+                    },
+                ],
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "candidate_spec_m7",
+                        "strict": True,
+                        "schema": CANDIDATE_SPEC_RESPONSE_SCHEMA,
+                    }
                 },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": user_prompt},
-                        {
-                            "type": "input_image",
-                            "image_url": _image_data_url(problem_image_path),
-                            "detail": self._image_detail,
-                        },
-                        {
-                            "type": "input_image",
-                            "image_url": _image_data_url(teacher_solution_image_path),
-                            "detail": self._image_detail,
-                        },
-                    ],
-                },
-            ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "candidate_spec_m7",
-                    "strict": True,
-                    "schema": CANDIDATE_SPEC_RESPONSE_SCHEMA,
-                }
-            },
-        )
+            )
+        except OpenAIAdapterError:
+            raise
+        except Exception as exc:
+            raise OpenAIResponseError("OpenAI analysis request failed") from exc
         payload = _extract_output_text(response)
         try:
             decoded = json.loads(payload)
