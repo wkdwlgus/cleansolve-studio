@@ -32,7 +32,7 @@
 | Re-render after patch | Done | patch 이후 deterministic SVG render artifact 생성/조회 API가 구현됨 |
 | Export | Done | PNG export foundation, artifact 저장/조회/download API가 구현됨. PDF는 M6에서 명시적으로 보류함 |
 | Real OpenAI adapter | Done | 선택형 `mock|openai` analysis adapter와 opt-in smoke test가 구현됨 |
-| E2E harness | Partial | upload-to-analysis fixture 경로는 완료됐으나 upload-to-export end-to-end 검증은 아직 없음 |
+| E2E harness | Done | M8 서버 E2E harness와 Playwright web upload smoke E2E가 fixture 기반 MVP 경로와 metric을 검증함 |
 
 ## Milestone
 
@@ -270,7 +270,11 @@
 
 ### M8. MVP E2E Harness & Release Checklist
 
-상태: Partial
+상태: Done
+
+상세 설계: [M8 MVP E2E Harness & Release Checklist 상세 설계](../superpowers/specs/2026-06-19-mvp-e2e-harness-release-checklist-design.md)
+
+구현 결과: pytest 기반 upload-to-export 서버 E2E harness, Playwright 기반 web upload smoke E2E, E2E metrics, MVP release checklist가 구현됨.
 
 목표:
 
@@ -309,13 +313,13 @@
 | 11 | 수정사항 spec patch 저장 | Done | M5 |
 | 12 | 수정 후 deterministic re-render | Done | M5 |
 | 13 | 최종 이미지 export | Partial | M6, M8 |
-| 14 | 최소 fixture harness 통과 | Partial | M8 |
+| 14 | 최소 fixture harness 통과 | Done | M8 |
 | 15 | freehand-style 치수선 표현 | Done | M0, M3 |
 | 16 | target anchor와 visible stroke 분리 저장 | Done | M0, M3 |
 | 17 | 치수선 label을 group 일부로 관리 | Done | M0, M3 |
 | 18 | 치수선 endpoint와 span 검증 | Partial | M2, M8 |
 | 19 | HITL이 예외 경로로 동작 | Done | M2, M4 |
-| 20 | 사용자 검수 노출률과 review item 개수 측정 | Partial | M8 |
+| 20 | 사용자 검수 노출률과 review item 개수 측정 | Done | M8 |
 | 21 | 생성/렌더링 결과 자동 검수 | Partial | M2, M8 |
 | 22 | 오류 발견 시 correction plan 생성 | Partial | M2, M8 |
 
@@ -344,10 +348,11 @@
 
 ## 다음 추천 작업
 
-다음 구현 작업은 `M8. MVP E2E Harness & Release Checklist`가 가장 적합하다.
+M8 기준으로 현재 상태는 `Partial MVP`다. 다음 작업은 새 milestone 번호를 미리 고정하지 않고, [MVP Release Checklist](./mvp-release-checklist.md)의 남은 gap 중 하나를 선택해 별도 설계부터 시작한다.
 
-이유:
+우선순위 후보:
 
-- M1부터 M7까지 upload, spec, render, patch, export foundation, OpenAI adapter opt-in 경로가 main에 반영될 준비가 됐다.
-- 이제 fixture 기준 upload-to-export end-to-end harness로 MVP 경로 전체를 검증해야 한다.
-- SoT 성공 기준 22개를 pass/partial/fail로 정리해 실제 MVP release 판단 근거를 만들어야 한다.
+1. 실제 OpenAI adapter 결과에 대한 dataset evaluation
+2. production-grade PNG/PDF export와 compositing 품질 개선
+3. Playwright visual regression과 browser full export flow
+4. 치수선 endpoint/source alignment의 이미지 기반 검증
