@@ -321,6 +321,8 @@ def test_settings_default_to_mock_analysis_client(monkeypatch):
 
     assert settings.analysis_client == "mock"
     assert settings.openai_model_analysis == "gpt-5.5"
+    assert settings.openai_model_validation == "gpt-5.5"
+    assert settings.openai_model_image == "gpt-image-2"
     assert settings.openai_analysis_image_detail == "auto"
     assert settings.openai_analysis_timeout_seconds == 60
 

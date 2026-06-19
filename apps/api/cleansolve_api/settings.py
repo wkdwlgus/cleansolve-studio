@@ -43,7 +43,7 @@ class Settings(BaseModel):
         default_factory=lambda: _env_value("OPENAI_MODEL_VALIDATION", "gpt-5.5")
     )
     openai_model_image: str = Field(
-        default_factory=lambda: _env_value("OPENAI_MODEL_IMAGE", "gpt-image-1")
+        default_factory=lambda: _env_value("OPENAI_MODEL_IMAGE", "gpt-image-2")
     )
     analysis_client: AnalysisClientKind = Field(
         default_factory=lambda: _env_value("CLEANSOLVE_ANALYSIS_CLIENT", "mock")
