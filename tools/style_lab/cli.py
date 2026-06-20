@@ -5,10 +5,12 @@ import json
 import sys
 from pathlib import Path
 
+from PIL import Image, UnidentifiedImageError
+
 from tools.style_lab.contact_sheet import build_contact_sheet
 from tools.style_lab.image_metrics import compute_image_metric, write_metrics_csv
 from tools.style_lab.manifest import build_calibration_manifest, write_json
-from tools.style_lab.models import ReferenceSample, StyleLabInputError
+from tools.style_lab.models import ImageMetric, ReferenceSample, StyleLabInputError
 from tools.style_lab.reference_set import CORE_SAMPLE_IDS, EXTENDED_SAMPLE_IDS, build_reference_samples
 from tools.style_lab.tokens import build_style_token_skeleton
 
@@ -27,6 +29,29 @@ def _validate_sample_files(samples: list[ReferenceSample], image_root: Path) -> 
     missing = [sample.filename for sample in samples if not (image_root / sample.filename).exists()]
     if missing:
         raise StyleLabInputError(f"missing reference images: {', '.join(missing)}")
+    invalid: list[str] = []
+    for sample in samples:
+        path = image_root / sample.filename
+        if not path.is_file():
+            invalid.append(sample.filename)
+            continue
+        try:
+            with Image.open(path) as image:
+                image.verify()
+        except (OSError, UnidentifiedImageError):
+            invalid.append(sample.filename)
+    if invalid:
+        raise StyleLabInputError(f"unreadable reference images: {', '.join(invalid)}")
+
+
+def _compute_metrics(samples: list[ReferenceSample], image_root: Path) -> list[ImageMetric]:
+    metrics = []
+    for sample in samples:
+        try:
+            metrics.append(compute_image_metric(sample.sample_id, image_root / sample.filename))
+        except (OSError, UnidentifiedImageError) as exc:
+            raise StyleLabInputError(f"unreadable reference image: {sample.filename}") from exc
+    return metrics
 
 
 def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
@@ -38,27 +63,30 @@ def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
     artifacts = _artifact_paths(output_root)
 
     _validate_sample_files(samples, image_root)
-    metrics = [compute_image_metric(sample.sample_id, image_root / sample.filename) for sample in samples]
+    metrics = _compute_metrics(samples, image_root)
     write_metrics_csv(metrics, Path(artifacts["metrics"]))
 
-    build_contact_sheet(
-        samples=core_samples,
-        image_root=image_root,
-        output_path=Path(artifacts["core_contact_sheet"]),
-        title=f"{args.preset_id} {args.preset_version} core reference set",
-        cell_width=args.contact_sheet_width,
-        cell_height=args.contact_sheet_height,
-        columns=args.columns,
-    )
-    build_contact_sheet(
-        samples=extended_samples,
-        image_root=image_root,
-        output_path=Path(artifacts["extended_contact_sheet"]),
-        title=f"{args.preset_id} {args.preset_version} extended calibration set",
-        cell_width=args.contact_sheet_width,
-        cell_height=args.contact_sheet_height,
-        columns=args.columns,
-    )
+    try:
+        build_contact_sheet(
+            samples=core_samples,
+            image_root=image_root,
+            output_path=Path(artifacts["core_contact_sheet"]),
+            title=f"{args.preset_id} {args.preset_version} core reference set",
+            cell_width=args.contact_sheet_width,
+            cell_height=args.contact_sheet_height,
+            columns=args.columns,
+        )
+        build_contact_sheet(
+            samples=extended_samples,
+            image_root=image_root,
+            output_path=Path(artifacts["extended_contact_sheet"]),
+            title=f"{args.preset_id} {args.preset_version} extended calibration set",
+            cell_width=args.contact_sheet_width,
+            cell_height=args.contact_sheet_height,
+            columns=args.columns,
+        )
+    except (OSError, UnidentifiedImageError) as exc:
+        raise StyleLabInputError(f"unreadable reference image while building contact sheets: {exc}") from exc
 
     manifest = build_calibration_manifest(
         preset_id=args.preset_id,
