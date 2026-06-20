@@ -3,6 +3,18 @@
   "preset_version": "v1",
   "source": "system_builtin",
   "description": "Default operator-managed handwriting style preset for the MVP.",
+  "calibration_status": "reference_contract_ready",
+  "reference_set": {
+    "doc": "docs/product/handwriting-style-reference-set.md",
+    "core_count": 19,
+    "extended_count": 26
+  },
+  "style_lab": {
+    "default_image_root": "image/clean_solutions",
+    "default_output_root": "image/style-lab/default_pretty_handwriting/v1",
+    "manifest_filename": "calibration_manifest.json",
+    "style_tokens_filename": "style_tokens.skeleton.json"
+  },
   "rendering_notes": {
     "formula_priority": "accuracy_first",
     "text_style": "clean_handwritten",

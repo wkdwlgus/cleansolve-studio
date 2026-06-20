@@ -66,3 +66,23 @@ Style Lab은 다음 산출물을 만들어야 한다.
 - core set 기반 canonical style sample sheet
 - renderer가 사용할 색상, 획 두께, baseline, spacing, jitter 파라미터 초안
 - 한글/수식/도형 주석이 같은 손글씨 계열처럼 보이는지 확인하는 style similarity gate 초안
+
+## Style Lab 실행
+
+승인된 레퍼런스 세트는 Style Lab의 기본 입력이다.
+
+```bash
+python -m tools.style_lab.cli build \
+  --image-root image/clean_solutions \
+  --output-root image/style-lab/default_pretty_handwriting/v1
+```
+
+생성되는 산출물은 다음과 같다.
+
+- `image/style-lab/default_pretty_handwriting/v1/core_contact_sheet.jpg`
+- `image/style-lab/default_pretty_handwriting/v1/extended_contact_sheet.jpg`
+- `image/style-lab/default_pretty_handwriting/v1/calibration_manifest.json`
+- `image/style-lab/default_pretty_handwriting/v1/style_tokens.skeleton.json`
+- `image/style-lab/default_pretty_handwriting/v1/metrics.csv`
+
+이 산출물은 `/image` 아래에 생성되므로 git에 커밋하지 않는다.
