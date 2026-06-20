@@ -357,11 +357,41 @@ Determinism:
 
 모든 테스트는 실제 `/image` 없이 동작해야 한다.
 
-테스트 fixture는 pytest `tmp_path` 아래에서 작은 PNG를 만든다. fixture 이미지는 다음 세 종류다.
+테스트 fixture는 pytest `tmp_path` 아래에서 PNG를 생성한다. fixture는 두 층으로 나눈다.
 
-1. 흰 배경에 검정 선.
-2. 흰 배경에 빨강/주황 선.
-3. 흰 배경에 파랑/보라 선.
+### Metric unit fixture
+
+색상/잉크 비율 계산을 분리 검증하기 위한 작은 PNG다.
+
+1. `blank_white.png`: 흰 배경만 있는 80x60 RGB 이미지.
+2. `black_line.png`: 흰 배경에 검정 선 1개가 있는 80x60 RGB 이미지.
+3. `red_orange_line.png`: 흰 배경에 빨강/주황 선 1개가 있는 80x60 RGB 이미지.
+4. `blue_purple_line.png`: 흰 배경에 파랑/보라 선 1개가 있는 80x60 RGB 이미지.
+
+### Composite solution fixture
+
+Style Lab 산출물 생성은 실제 풀이 이미지에 더 가까운 합성 fixture로 검증한다. 이 fixture는 외부 파일을 커밋하지 않고, 테스트 안에서 PIL로 생성한다.
+
+각 합성 이미지는 최소 640x900 RGB 이미지여야 한다. 배경은 흰색이고 아래 요소를 모두 포함한다.
+
+1. 상단 문제 영역: 옅은 회색 인쇄문처럼 보이는 여러 줄의 작은 텍스트형 stroke.
+2. 검정 풀이 영역: 8줄 이상의 수식형 stroke, 분수선, 등호, 괄호형 곡선.
+3. 한글 설명 대체 영역: 실제 한글 OCR을 테스트하지 않으므로 짧은 검정 stroke 묶음과 spacing이 있는 문단 블록.
+4. 기하/그래프 영역: 삼각형 또는 좌표축, 원호, 점 라벨 위치를 가진 도형.
+5. 파란색 주석: 도형 라벨, 핵심 식 밑줄, 결론 표시 중 2개 이상.
+6. 빨강/주황 주석: 보조선, 치환식, 박스 강조 중 2개 이상.
+7. 해칭 영역: 같은 방향의 짧은 선 8개 이상.
+8. 충분한 여백: contact sheet가 contain 방식으로 축소해도 레이아웃이 깨지지 않도록 바깥 여백 24px 이상.
+
+`tools/style_lab/tests`는 합성 fixture 5개를 만든다.
+
+- `GT_024.png`: 기하 도형과 높은 잉크 밀도 중심.
+- `GT_049.png`: 좌표 그래프와 해칭 중심.
+- `GT_079.png`: 큰 적분/분수형 stroke 중심.
+- `GT_086.png`: 문단형 설명과 수식 혼합 중심.
+- `GT_147.png`: 단계형 풀이와 색상별 결론 정리 중심.
+
+CLI 통합 테스트에서 승인된 45개 전체 파일이 필요할 때는 위 5개 패턴을 sample id별로 순환 적용해 `GT_001.png`부터 필요한 sample id 파일을 모두 생성한다. 단, 파일명과 sample id 목록은 실제 core/extended 계약을 그대로 따라야 한다.
 
 ### 필수 테스트
 
@@ -385,6 +415,8 @@ Determinism:
 - contact sheet 파일이 생성된다.
 - output image mode는 `RGB`이다.
 - output image width와 height가 입력 sample 수, column 수, cell 크기 기준으로 기대값과 일치한다.
+- 합성 풀이 fixture 5개를 contact sheet에 넣어도 파일이 생성된다.
+- contact sheet의 첫 번째 cell label 영역에는 첫 번째 sample id의 어두운 픽셀이 존재한다.
 - 누락된 이미지가 있으면 `StyleLabInputError`를 발생시킨다.
 
 `tools/style_lab/tests/test_manifest.py`
@@ -398,6 +430,8 @@ Determinism:
 
 - fixture image root와 tmp output root로 `build` command가 exit code 0을 반환한다.
 - stdout JSON의 artifact path들이 실제 파일로 존재한다.
+- CLI 성공 테스트는 승인된 core/extended sample id 45개에 해당하는 합성 풀이 fixture 파일을 모두 생성한 뒤 실행한다.
+- 생성된 `core_contact_sheet.jpg`와 `extended_contact_sheet.jpg`의 크기가 0보다 크고 PIL로 열 수 있다.
 - 이미지가 누락된 경우 exit code 2를 반환하고 stderr가 `Style Lab input error:`로 시작한다.
 
 ## 완료 기준
