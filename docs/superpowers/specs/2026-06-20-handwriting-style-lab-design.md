@@ -68,6 +68,7 @@ Extended set:
 - `assets/style-presets/default_pretty_handwriting/preset.json`
 - `docs/product/handwriting-style-reference-set.md`
 - `pyproject.toml`
+- `pytest.ini`
 
 ### 생성되지만 커밋하지 않는 파일
 
@@ -328,15 +329,18 @@ Determinism:
 
 기존 field는 삭제하지 않는다.
 
-## pyproject 설정
+## Dependency and pytest 설정
 
 `pyproject.toml`은 아래처럼 명시적으로 수정한다.
 
 1. `[project].dependencies` 배열에 `"Pillow"`를 추가한다.
-2. `[tool.pytest.ini_options].testpaths` 배열에 `"tools/style_lab/tests"`를 추가한다.
-3. `[tool.pytest.ini_options].pythonpath` 배열에 `"."`를 추가한다.
 
 새 runtime dependency는 `Pillow`만 허용한다. Pillow가 이미 dev/test 환경에 설치되어 있어도 `pyproject.toml` dependency에 명시한다.
+
+`pytest.ini`는 아래처럼 명시적으로 수정한다. 이 저장소는 `pytest.ini`가 pytest 설정의 기준 파일이므로, `pyproject.toml`에 `[tool.pytest.ini_options]`를 추가하지 않는다.
+
+1. `[pytest].testpaths`에 `tools/style_lab/tests`를 추가한다.
+2. `[pytest].pythonpath`에 `.`를 추가한다.
 
 ## 문서
 

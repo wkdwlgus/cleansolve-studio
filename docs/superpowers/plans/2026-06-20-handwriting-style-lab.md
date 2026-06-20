@@ -32,7 +32,8 @@ Create:
 
 Modify:
 
-- `pyproject.toml`: add `Pillow`, add style lab tests to pytest testpaths, add `.` to pythonpath.
+- `pyproject.toml`: add `Pillow`.
+- `pytest.ini`: add style lab tests to pytest testpaths and add `.` to pythonpath.
 - `assets/style-presets/default_pretty_handwriting/preset.json`: add calibration contract fields.
 - `docs/product/handwriting-style-reference-set.md`: add Style Lab command and output paths.
 
@@ -54,6 +55,7 @@ Generated but not committed:
 - Create: `tools/style_lab/reference_set.py`
 - Create: `tools/style_lab/tests/test_reference_set.py`
 - Modify: `pyproject.toml`
+- Modify: `pytest.ini`
 
 - [ ] **Step 1: Write failing reference set tests**
 
@@ -96,7 +98,7 @@ def test_build_reference_samples_assigns_tiers_roles_and_filenames():
     assert samples[-1].filename == f"{samples[-1].sample_id}.png"
 ```
 
-- [ ] **Step 2: Update pytest discovery before running tests**
+- [ ] **Step 2: Update dependency and pytest discovery before running tests**
 
 Modify `pyproject.toml`:
 
@@ -111,27 +113,31 @@ dependencies = [
   "pytest",
   "python-multipart",
 ]
-
-[tool.pytest.ini_options]
-testpaths = [
-  "apps/api/tests",
-  "packages/ai/tests",
-  "packages/harness/tests",
-  "packages/renderer/tests",
-  "packages/spec/tests",
-  "packages/workflow/tests",
-  "tools/style_lab/tests",
-]
-pythonpath = [
-  ".",
-  "apps/api",
-  "packages/ai",
-  "packages/harness",
-  "packages/renderer",
-  "packages/spec",
-  "packages/workflow",
-]
 ```
+
+Modify `pytest.ini`:
+
+```ini
+[pytest]
+testpaths =
+    apps/api/tests
+    packages/ai/tests
+    packages/harness/tests
+    packages/renderer/tests
+    packages/spec/tests
+    packages/workflow/tests
+    tools/style_lab/tests
+pythonpath =
+    .
+    apps/api
+    packages/ai
+    packages/harness
+    packages/renderer
+    packages/spec
+    packages/workflow
+```
+
+Do not add `[tool.pytest.ini_options]` to `pyproject.toml`; this repository already uses `pytest.ini` as the pytest configuration source.
 
 - [ ] **Step 3: Run test to verify it fails**
 
@@ -292,7 +298,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add pyproject.toml tools/style_lab/__init__.py tools/style_lab/models.py tools/style_lab/reference_set.py tools/style_lab/tests/test_reference_set.py
+git add pyproject.toml pytest.ini tools/style_lab/__init__.py tools/style_lab/models.py tools/style_lab/reference_set.py tools/style_lab/tests/test_reference_set.py
 git commit -m "feat(style-lab): add reference set contract"
 ```
 
@@ -1522,10 +1528,10 @@ Expected: no output.
 
 - [ ] **Step 7: Commit any bugfixes if verification required source changes**
 
-If Step 1-6 required source edits, commit the exact files that changed. For this plan, valid source files are under `tools/style_lab/`, `assets/style-presets/default_pretty_handwriting/preset.json`, `docs/product/handwriting-style-reference-set.md`, and `pyproject.toml`.
+If Step 1-6 required source edits, commit the exact files that changed. For this plan, valid source files are under `tools/style_lab/`, `assets/style-presets/default_pretty_handwriting/preset.json`, `docs/product/handwriting-style-reference-set.md`, `pyproject.toml`, and `pytest.ini`.
 
 ```bash
-git add tools/style_lab assets/style-presets/default_pretty_handwriting/preset.json docs/product/handwriting-style-reference-set.md pyproject.toml
+git add tools/style_lab assets/style-presets/default_pretty_handwriting/preset.json docs/product/handwriting-style-reference-set.md pyproject.toml pytest.ini
 git commit -m "fix(style-lab): address verification findings"
 ```
 
