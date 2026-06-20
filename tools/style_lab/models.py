@@ -28,3 +28,29 @@ class ReferenceSample:
 
     def to_json(self) -> dict[str, str]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class ImageMetric:
+    sample_id: str
+    path: str
+    width: int
+    height: int
+    aspect_ratio: float
+    ink_ratio: float
+    dark_ratio: float
+    red_ratio: float
+    blue_ratio: float
+
+    def to_csv_row(self) -> list[str]:
+        return [
+            self.sample_id,
+            self.path,
+            str(self.width),
+            str(self.height),
+            f"{self.aspect_ratio:.6f}",
+            f"{self.ink_ratio:.6f}",
+            f"{self.dark_ratio:.6f}",
+            f"{self.red_ratio:.6f}",
+            f"{self.blue_ratio:.6f}",
+        ]
