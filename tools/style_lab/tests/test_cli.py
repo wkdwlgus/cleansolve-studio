@@ -97,3 +97,60 @@ def test_cli_build_returns_code_2_for_invalid_existing_image(tmp_path, approved_
     assert result.stderr.startswith("Style Lab input error:")
     assert "GT_024.png" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_cli_build_returns_code_2_when_output_root_is_existing_file(
+    tmp_path, approved_reference_image_root
+):
+    output_root = tmp_path / "out"
+    output_root.write_text("not a directory", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tools.style_lab.cli",
+            "build",
+            "--image-root",
+            str(approved_reference_image_root),
+            "--output-root",
+            str(output_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("Style Lab input error:")
+    assert str(output_root) in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_cli_build_validates_columns_before_writing_artifacts(
+    tmp_path, approved_reference_image_root
+):
+    output_root = tmp_path / "out"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tools.style_lab.cli",
+            "build",
+            "--image-root",
+            str(approved_reference_image_root),
+            "--output-root",
+            str(output_root),
+            "--columns",
+            "0",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("Style Lab input error:")
+    assert "columns" in result.stderr
+    assert not any(output_root.glob("*"))

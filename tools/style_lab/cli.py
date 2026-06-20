@@ -44,6 +44,17 @@ def _validate_sample_files(samples: list[ReferenceSample], image_root: Path) -> 
         raise StyleLabInputError(f"unreadable reference images: {', '.join(invalid)}")
 
 
+def _validate_output_options(args: argparse.Namespace, output_root: Path) -> None:
+    if output_root.exists() and not output_root.is_dir():
+        raise StyleLabInputError(f"output root is not a directory: {output_root}")
+    if output_root.parent.exists() and not output_root.parent.is_dir():
+        raise StyleLabInputError(f"output root parent is not a directory: {output_root.parent}")
+    if args.columns <= 0:
+        raise StyleLabInputError("columns must be greater than 0")
+    if args.contact_sheet_width <= 0 or args.contact_sheet_height <= 0:
+        raise StyleLabInputError("contact sheet dimensions must be greater than 0")
+
+
 def _compute_metrics(samples: list[ReferenceSample], image_root: Path) -> list[ImageMetric]:
     metrics = []
     for sample in samples:
@@ -62,6 +73,7 @@ def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
     extended_samples = [sample for sample in samples if sample.tier == "extended"]
     artifacts = _artifact_paths(output_root)
 
+    _validate_output_options(args, output_root)
     _validate_sample_files(samples, image_root)
     metrics = _compute_metrics(samples, image_root)
     write_metrics_csv(metrics, Path(artifacts["metrics"]))
