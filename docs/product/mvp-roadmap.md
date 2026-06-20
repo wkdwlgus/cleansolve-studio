@@ -352,7 +352,12 @@ M8 기준으로 현재 상태는 `Partial MVP`다. 다음 작업은 새 mileston
 
 우선순위 후보:
 
-1. 실제 OpenAI adapter 결과에 대한 dataset evaluation
-2. production-grade PNG/PDF export와 compositing 품질 개선
-3. Playwright visual regression과 browser full export flow
-4. 치수선 endpoint/source alignment의 이미지 기반 검증
+1. Handwriting Style Lab과 `default_pretty_handwriting v1` renderer calibration
+2. GPT-5.5 기반 ReAct review/correction workflow와 eval gate
+3. job progress SSE stream과 web progress UI
+4. 실제 OpenAI adapter 결과에 대한 dataset evaluation
+5. production-grade PNG/PDF export와 compositing 품질 개선
+6. Playwright visual regression과 browser full export flow
+7. 치수선 endpoint/source alignment의 이미지 기반 검증
+
+현재 추천 순서는 1번이다. 이유는 한글, 수식, 도형 주석이 같은 손글씨 계열처럼 보여야 이후 OpenAI 분석, correction workflow, export 품질 평가가 의미를 갖기 때문이다. 이 작업은 [AI Review & Correction Workflow](../architecture/ai-review-correction-workflow.md)의 Style Lab 단계부터 시작한다.

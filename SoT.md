@@ -99,10 +99,12 @@
   - [11.1 Responses API 용도](#111-responses-api-용도)
   - [11.2 Images API 또는 image generation tool 용도](#112-images-api-또는-image-generation-tool-용도)
   - [11.3 모델 호출 원칙](#113-모델-호출-원칙)
+  - [11.4 AI review/correction agent](#114-ai-reviewcorrection-agent)
 - [12. 상태 관리](#12-상태-관리)
   - [12.1 Job 상태](#121-job-상태)
   - [12.2 저장해야 할 산출물](#122-저장해야-할-산출물)
   - [12.3 Revision 기록](#123-revision-기록)
+  - [12.4 사용자 진행 상황 스트리밍](#124-사용자-진행-상황-스트리밍)
 - [13. Quality Harness / Evaluation Harness](#13-quality-harness--evaluation-harness)
 - [14. 권장 기술 방향](#14-권장-기술-방향)
   - [14.1 기본 방향](#141-기본-방향)
@@ -1655,11 +1657,12 @@ AI 원샷 이미지 생성이 보여준 예쁜 글씨체는 중요한 스타일 
 
 권장 구조:
 
-1. AI는 예쁜 손글씨 스타일 asset 또는 preview를 생성한다.
-2. Candidate spec은 수식, 라벨, 치수선, 화살표, box, curve의 위치와 의미를 관리한다.
-3. Renderer는 확정된 spec을 원본 이미지 위에 합성한다.
-4. 단순 수정은 spec patch + deterministic re-render로 처리한다.
-5. 스타일 품질이 낮은 경우에만 해당 text/formula asset 단위로 AI 재생성을 고려한다.
+1. Style Lab은 운영자가 등록한 예쁜 손글씨 이미지를 분석하고, `default_pretty_handwriting` renderer 파라미터와 sample sheet를 캘리브레이션한다.
+2. GPT-5.5는 원본 문제 이미지와 선생님 손풀이 이미지를 분석해 candidate spec을 만든다.
+3. Deterministic renderer는 확정된 spec과 style preset을 원본 이미지 위에 재현 가능하게 합성한다.
+4. GPT-5.5 기반 review/correction agent는 렌더 결과를 보고 content, layout, style, visual diff를 검수한 뒤 필요한 tool을 선택한다.
+5. 스타일 품질이 낮은 text/formula block은 전체 이미지를 재생성하지 않고 해당 block asset 단위로만 `gpt-image-2` 재생성을 고려한다.
+6. 최종 출력은 AI의 주관적 승인만으로 통과하지 않고, contract validation과 eval gate를 통과해야 한다.
 
 <a id="section-10-4"></a>
 ## 10.4 손글씨 스타일 처리
@@ -1674,27 +1677,45 @@ AI 원샷 이미지 생성이 보여준 예쁜 글씨체는 중요한 스타일 
 1. 시스템 내장 예쁜 손글씨 스타일 폰트 또는 handwriting-like font
 2. 운영자가 등록한 스타일 기준 이미지를 내부 asset으로 보관하고, 이미지 생성 API 호출 시 컨텍스트로 사용
 3. 이미지 생성 API를 이용한 시스템 내장 스타일 참고 기반 텍스트/수식 asset 렌더링
-4. 수식은 LaTeX/KaTeX 기반으로 정확히 렌더링하고, 주변 주석만 손글씨 스타일 적용
+4. 수식은 구조 정확성을 유지하되, 한글 텍스트와 따로 놀지 않도록 stroke 두께, 기울기, baseline, spacing, freehand perturbation을 style preset 기준으로 보정한다.
 5. 장기적으로 여러 시스템 스타일 preset 도입
 6. 장기적으로 사용자 지정 스타일 업로드 또는 개인별 스타일 학습 검토
 
-정확도가 필요한 수식은 미학보다 정확성을 우선한다.
+정확도가 필요한 수식은 미학보다 정확성을 우선한다. 다만 최종 사용자가 보는 결과에서 한글 설명과 수식이 서로 다른 시스템에서 나온 것처럼 보이면 안 된다. 따라서 복잡한 수식은 구조는 deterministic math layout으로 유지하고, 시각 스타일은 system preset의 손글씨 규칙과 필요 시 block-level image asset으로 보정한다.
 
 <a id="section-10-5"></a>
 ## 10.5 재렌더링과 재생성의 우선순위
 
-오류 수정 시 우선순위는 다음이다.
+오류 수정 시 review/correction agent가 먼저 결과를 검수하고 허용된 tool 중 다음 행동을 선택한다. 이 agent는 결정 레이어이며, 실제 수정 작업 자체가 아니다.
+
+허용된 수정 우선순위는 다음이다.
 
 ```text
 1. spec patch
 2. deterministic partial re-render
-3. handwriting asset partial regeneration
-4. limited image edit
+3. block-level handwriting asset regeneration
+4. limited image edit within a specific block or bbox
 5. full image regeneration
 6. HITL
 ```
 
-전체 이미지 재생성은 비용이 크고, 멀쩡한 영역이 흔들릴 수 있으므로 기본 경로가 아니다.
+전체 이미지 재생성은 비용이 크고, 멀쩡한 영역이 흔들릴 수 있으므로 기본 경로가 아니다. 초기 MVP 이후에도 `gpt-image-2`의 기본 역할은 특정 text/formula block의 손글씨 asset 생성이며, 전체 이미지 생성은 마지막 fallback으로만 취급한다.
+
+Correction loop는 단순히 정해진 노드를 순서대로 통과하는 상태머신만으로 처리하지 않는다. GPT-5.5 기반 review/correction agent가 현재 render, candidate spec, source images, style preset, 이전 correction history, eval score를 보고 ReAct 방식으로 다음 tool을 선택한다. 단, tool 실행은 서버가 허용한 안전한 작업으로 제한한다.
+
+자동 승인 조건은 모델의 주관적 판단만으로 정하지 않는다. 최소한 다음 gate를 통과해야 한다.
+
+```text
+contract_valid = true
+content_consistency_score >= threshold
+layout_alignment_score >= threshold
+style_similarity_score >= threshold
+visual_diff_score <= threshold
+visible_review_item_count <= budget
+max_error_severity <= allowed_level
+```
+
+Loop 횟수는 충분히 크게 둘 수 있으나 무한 반복하지 않는다. 점수 개선이 멈추거나, 같은 element를 반복 수정하거나, 비용 budget을 초과하거나, 모델 confidence가 낮으면 HITL로 전환한다.
 
 ---
 
@@ -1721,14 +1742,12 @@ Responses API는 다음에 사용한다.
 
 이미지 생성/편집 API는 다음에 사용한다.
 
-* 초기 고품질 미리보기 생성
-* 시스템 내장 스타일 프리셋을 반영한 시각적 초안 생성
-* 복잡한 손글씨 스타일 변환
-* deterministic renderer로 처리하기 어려운 자연스러운 필기 재배치
 * 텍스트/수식 블록의 손글씨 스타일 asset 생성
-* 자동 self-revision loop에서 필요한 부분 재생성 또는 제한적 재편집
+* deterministic renderer로 처리하기 어려운 특정 block 또는 bbox 내부의 제한적 필기 보정
+* 자동 self-revision loop에서 review/correction agent가 명시적으로 요청한 block-level asset 재생성
 
 단, 단순 수정마다 전체 이미지를 재생성하지 않는다.
+초기 고품질 미리보기, 스타일 초안, 복잡한 손글씨 변환도 전체 이미지 단위가 아니라 block-level asset 또는 style-lab calibration 산출물로 제한한다.
 
 초기 MVP에서는 이미지 생성/편집 API 호출에 사용되는 스타일 기준이 사용자 업로드 이미지가 아니라, 시스템 내부 asset 또는 preset id로 관리되는 기본 스타일이다.
 
@@ -1743,6 +1762,39 @@ Responses API는 다음에 사용한다.
 * 모델이 생성한 결과는 원본 이미지와 다시 비교한다.
 * 스타일 기준은 초기 MVP에서 `system_builtin` 프리셋만 사용한다.
 * 자동 self-revision loop는 무한 반복하지 않는다.
+
+<a id="section-11-4"></a>
+## 11.4 AI review/correction agent
+
+LangGraph는 전체 workflow 상태, retry, 분기, 승인, HITL 전환을 관리한다. 그 안에서 GPT-5.5 기반 review/correction agent는 ReAct 방식으로 검수와 수정 전략 선택을 담당한다.
+
+Agent가 사용할 수 있는 tool은 서버가 명시적으로 제공한 것만 허용한다.
+
+```text
+inspect_content
+inspect_layout
+inspect_style
+compute_visual_diff
+patch_candidate_spec
+request_handwriting_asset
+rerender
+mark_approved
+escalate_hitl
+```
+
+각 tool의 역할:
+
+1. `inspect_content`: 풀이 내용, 수식, 순서가 선생님 손풀이와 맞는지 검사한다.
+2. `inspect_layout`: bbox, anchor, 라벨, 치수선 위치가 원본 문제 위에서 맞는지 검사한다.
+3. `inspect_style`: 한글, 숫자, 수식, 선이 같은 손글씨 계열처럼 보이는지 검사한다.
+4. `compute_visual_diff`: 현재 render와 원본 문제 이미지, 선생님 손풀이 이미지, system style sample sheet, 이전 attempt 사이의 diff score를 목적별로 분리해 계산한다.
+5. `patch_candidate_spec`: 위치, 크기, 색상, anchor, label position 같은 spec patch를 적용한다.
+6. `request_handwriting_asset`: 특정 text/formula block만 `gpt-image-2`로 손글씨 asset 생성을 요청한다.
+7. `rerender`: deterministic renderer를 다시 실행한다.
+8. `mark_approved`: eval gate 기준을 통과한 경우에만 승인한다.
+9. `escalate_hitl`: 자동 해결이 어렵거나 확신이 낮으면 사용자 검수로 넘긴다.
+
+이 agent는 전체 이미지를 매번 재생성하지 않는다. 전체 이미지 재생성은 마지막에 가까운 fallback이며, 기본 경로는 spec patch, deterministic re-render, block-level handwriting asset regeneration이다.
 
 ---
 
@@ -1829,6 +1881,52 @@ pass_or_fail
 ```
 
 이 기록은 나중에 품질 분석과 오류 재현에 사용한다.
+
+<a id="section-12-4"></a>
+## 12.4 사용자 진행 상황 스트리밍
+
+AI 분석, ReAct review/correction loop, block-level handwriting asset generation은 대기 시간이 길 수 있다. 사용자가 빈 화면에서 기다리면 체감 latency가 커지므로, web client는 job 실행 중 서버 진행 상황을 실시간으로 볼 수 있어야 한다.
+
+권장 방식은 Server-Sent Events(SSE)이다. 이유는 job progress가 서버에서 클라이언트로 흐르는 단방향 이벤트에 가깝고, 초기 MVP에서 양방향 WebSocket protocol까지 필요하지 않기 때문이다.
+
+서버는 job별 progress stream을 제공한다.
+
+```text
+GET /jobs/{job_id}/events
+Content-Type: text/event-stream
+```
+
+이 stream은 모델 내부 chain-of-thought를 노출하지 않는다. 서버가 allowlist로 정의한 `phase`, `status`, `message`, `next_action` label과 aggregate score만 노출한다. Raw model output, raw tool observation, 내부 prompt, hidden reasoning summary, 필터링되지 않은 correction note는 stream에 포함하지 않는다.
+
+예시 event:
+
+```json
+{
+  "job_id": "job_123",
+  "phase": "review_and_correct",
+  "status": "INSPECTING_RENDER",
+  "message": "렌더 결과와 선생님 손풀이를 비교하고 있습니다.",
+  "attempt": 3,
+  "max_attempts": 12,
+  "scores": {
+    "content_consistency": 0.91,
+    "layout_alignment": 0.87,
+    "style_similarity": 0.74,
+    "visual_diff": 0.18
+  },
+  "next_action": "style_adjustment"
+}
+```
+
+UI는 이 stream을 사용해 다음을 표시한다.
+
+1. 현재 단계: 분석 중, spec 검증 중, 렌더링 중, 결과 검수 중, 자동 수정 중, 손글씨 asset 생성 중, export 중
+2. 현재 attempt와 최대 attempt
+3. 사용자가 이해할 수 있는 짧은 한국어 상태 메시지
+4. 개선 중인 항목: 내용, 위치, 스타일, 수식 asset 등
+5. HITL로 넘어갈 가능성이 있는 경우의 안내
+
+SSE progress는 품질 판정 자체가 아니다. 최종 승인 여부는 eval gate와 HITL 정책이 결정한다. SSE는 긴 처리 시간의 체감 latency를 줄이고, 사용자가 시스템이 멈춘 것이 아니라 어떤 과정을 거치는지 이해하게 만드는 UX 장치이다.
 
 ---
 

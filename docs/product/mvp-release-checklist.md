@@ -68,6 +68,10 @@ npx --prefix apps/web playwright install chromium
 아직 production ready로 보지 않는 이유:
 
 - OpenAI adapter는 opt-in smoke 수준이며 대량 dataset 평가가 없다.
+- 시스템 내장 손글씨 스타일은 metadata와 기본 renderer 규칙 수준이며, 실제 이쁜 손글씨 reference corpus 기반 캘리브레이션이 없다.
+- 한글/수식/도형 주석이 한 사람의 손글씨처럼 보이는지 측정하는 style similarity gate가 없다.
+- GPT-5.5 기반 ReAct review/correction agent와 score 기반 eval gate가 없다.
+- 긴 AI 분석/보정 loop 동안 사용자가 진행 상황을 볼 수 있는 SSE progress UX가 없다.
 - PDF export가 없다.
 - 상용 품질 raster compositing 검증이 없다.
 - browser full export flow와 visual snapshot regression이 없다.
@@ -75,6 +79,10 @@ npx --prefix apps/web playwright install chromium
 
 ## 남은 gap
 
+- Handwriting Style Lab과 `default_pretty_handwriting v1` renderer calibration
+- GPT-5.5 기반 ReAct review/correction workflow
+- content/layout/style/visual diff score 기반 eval gate
+- job progress SSE stream과 web progress UI
 - 실제 OpenAI adapter 결과에 대한 dataset evaluation
 - 여러 문제/여러 페이지 입력에 대한 crop 및 matching 평가
 - PDF export와 production-grade compositing
