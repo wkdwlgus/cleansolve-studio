@@ -360,4 +360,4 @@ M8 기준으로 현재 상태는 `Partial MVP`다. 다음 작업은 새 mileston
 6. Playwright visual regression과 browser full export flow
 7. 치수선 endpoint/source alignment의 이미지 기반 검증
 
-현재 추천 순서는 1번이다. 이유는 한글, 수식, 도형 주석이 같은 손글씨 계열처럼 보여야 이후 OpenAI 분석, correction workflow, export 품질 평가가 의미를 갖기 때문이다. 이 작업은 [AI Review & Correction Workflow](../architecture/ai-review-correction-workflow.md)의 Style Lab 단계부터 시작한다.
+현재 추천 순서는 1번이다. 이유는 한글, 수식, 도형 주석이 같은 손글씨 계열처럼 보여야 이후 OpenAI 분석, correction workflow, export 품질 평가가 의미를 갖기 때문이다. 이 작업은 [손글씨 스타일 레퍼런스 세트](./handwriting-style-reference-set.md)를 입력으로 삼고, [AI Review & Correction Workflow](../architecture/ai-review-correction-workflow.md)의 Style Lab 단계부터 시작한다.
