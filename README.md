@@ -179,7 +179,8 @@ npm --prefix apps/web run build
 2. [설계 spec](./docs/superpowers/specs/2026-06-14-cleansolve-studio-scaffold-design.md)
 3. [구현 plan](./docs/superpowers/plans/2026-06-14-cleansolve-studio-scaffold.md)
 4. [저장소 구조](./docs/architecture/repository-structure.md)
-5. [초기 workflow](./docs/workflow/initial-workflow.md)
-6. [HITL UX 정책](./docs/hitl/ux-policy.md)
+5. [AI review/correction workflow](./docs/architecture/ai-review-correction-workflow.md)
+6. [초기 workflow](./docs/workflow/initial-workflow.md)
+7. [HITL UX 정책](./docs/hitl/ux-policy.md)
 
 SoT와 구현이 충돌하는 경우 SoT를 우선합니다.
