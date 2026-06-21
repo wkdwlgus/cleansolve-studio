@@ -154,3 +154,63 @@ def test_cli_build_validates_columns_before_writing_artifacts(
     assert result.stderr.startswith("Style Lab input error:")
     assert "columns" in result.stderr
     assert not any(output_root.glob("*"))
+
+
+def test_cli_build_rejects_artifact_path_directory_before_writing_partial_artifacts(
+    tmp_path, approved_reference_image_root
+):
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    existing_entries = {"extended_contact_sheet.jpg"}
+    (output_root / "extended_contact_sheet.jpg").mkdir()
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tools.style_lab.cli",
+            "build",
+            "--image-root",
+            str(approved_reference_image_root),
+            "--output-root",
+            str(output_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("Style Lab input error:")
+    assert "extended_contact_sheet.jpg" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert {path.name for path in output_root.iterdir()} == existing_entries
+
+
+def test_cli_build_returns_code_2_when_nested_output_parent_is_file(
+    tmp_path, approved_reference_image_root
+):
+    blocked_parent = tmp_path / "notdir"
+    blocked_parent.write_text("not a directory", encoding="utf-8")
+    output_root = blocked_parent / "child" / "out"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tools.style_lab.cli",
+            "build",
+            "--image-root",
+            str(approved_reference_image_root),
+            "--output-root",
+            str(output_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("Style Lab input error:")
+    assert str(blocked_parent) in result.stderr
+    assert "Traceback" not in result.stderr

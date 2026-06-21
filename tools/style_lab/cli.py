@@ -44,11 +44,35 @@ def _validate_sample_files(samples: list[ReferenceSample], image_root: Path) -> 
         raise StyleLabInputError(f"unreadable reference images: {', '.join(invalid)}")
 
 
-def _validate_output_options(args: argparse.Namespace, output_root: Path) -> None:
+def _validate_existing_ancestors(path: Path) -> None:
+    current = path
+    while not current.exists() and current != current.parent:
+        current = current.parent
+    if current.exists() and not current.is_dir():
+        raise StyleLabInputError(f"output path parent is not a directory: {current}")
+
+
+def _validate_artifact_paths(artifacts: dict[str, str]) -> None:
+    invalid = [
+        artifact
+        for artifact in artifacts.values()
+        if Path(artifact).exists() and not Path(artifact).is_file()
+    ]
+    if invalid:
+        raise StyleLabInputError(f"artifact path is not a file: {', '.join(invalid)}")
+
+
+def _validate_output_options(
+    args: argparse.Namespace,
+    output_root: Path,
+    artifacts: dict[str, str],
+) -> None:
+    _validate_existing_ancestors(output_root)
     if output_root.exists() and not output_root.is_dir():
         raise StyleLabInputError(f"output root is not a directory: {output_root}")
-    if output_root.parent.exists() and not output_root.parent.is_dir():
-        raise StyleLabInputError(f"output root parent is not a directory: {output_root.parent}")
+    for artifact_path in artifacts.values():
+        _validate_existing_ancestors(Path(artifact_path).parent)
+    _validate_artifact_paths(artifacts)
     if args.columns <= 0:
         raise StyleLabInputError("columns must be greater than 0")
     if args.contact_sheet_width <= 0 or args.contact_sheet_height <= 0:
@@ -73,7 +97,7 @@ def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
     extended_samples = [sample for sample in samples if sample.tier == "extended"]
     artifacts = _artifact_paths(output_root)
 
-    _validate_output_options(args, output_root)
+    _validate_output_options(args, output_root, artifacts)
     _validate_sample_files(samples, image_root)
     metrics = _compute_metrics(samples, image_root)
     write_metrics_csv(metrics, Path(artifacts["metrics"]))
