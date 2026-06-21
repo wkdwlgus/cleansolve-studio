@@ -210,6 +210,44 @@ def test_cli_build_returns_style_lab_error_for_non_integer_dimension(
     assert "usage:" not in result.stderr
 
 
+def test_cli_build_returns_style_lab_error_for_unknown_option():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tools.style_lab.cli",
+            "build",
+            "--bad",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("Style Lab input error:")
+    assert "--bad" in result.stderr
+    assert "usage:" not in result.stderr
+
+
+def test_cli_returns_style_lab_error_for_missing_command():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tools.style_lab.cli",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("Style Lab input error:")
+    assert "command" in result.stderr
+    assert "usage:" not in result.stderr
+
+
 def test_cli_build_rejects_artifact_path_directory_before_writing_partial_artifacts(
     tmp_path, approved_reference_image_root
 ):

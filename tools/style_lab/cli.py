@@ -15,6 +15,11 @@ from tools.style_lab.reference_set import CORE_SAMPLE_IDS, EXTENDED_SAMPLE_IDS, 
 from tools.style_lab.tokens import build_style_token_skeleton
 
 
+class StyleLabArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise StyleLabInputError(message)
+
+
 def _artifact_paths(output_root: Path) -> dict[str, str]:
     return {
         "core_contact_sheet": str(output_root / "core_contact_sheet.jpg"),
@@ -166,8 +171,12 @@ def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m tools.style_lab.cli")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser = StyleLabArgumentParser(prog="python -m tools.style_lab.cli")
+    subparsers = parser.add_subparsers(
+        dest="command",
+        parser_class=StyleLabArgumentParser,
+        required=True,
+    )
 
     build = subparsers.add_parser("build")
     build.add_argument("--image-root", default="image/clean_solutions")
@@ -182,8 +191,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
     try:
+        args = parser.parse_args(argv)
         if args.command == "build":
             payload = build_style_lab(args)
         else:
