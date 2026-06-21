@@ -7,25 +7,8 @@ dependencies = [
   "fastapi",
   "langgraph",
   "openai",
+  "Pillow",
   "pydantic",
   "pytest",
   "python-multipart",
-]
-
-[tool.pytest.ini_options]
-testpaths = [
-  "apps/api/tests",
-  "packages/ai/tests",
-  "packages/harness/tests",
-  "packages/renderer/tests",
-  "packages/spec/tests",
-  "packages/workflow/tests",
-]
-pythonpath = [
-  "apps/api",
-  "packages/ai",
-  "packages/harness",
-  "packages/renderer",
-  "packages/spec",
-  "packages/workflow",
 ]
