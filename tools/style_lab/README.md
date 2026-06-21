@@ -18,6 +18,37 @@ python -m tools.style_lab.cli build \
   --output-root image/style-lab/default_pretty_handwriting/v1
 ```
 
+`build` 명령은 같은 입력에 대해 재현 가능한 deterministic 산출물을 만듭니다. 이 산출물은 GPT-5.5 스타일 프로필 추출과 renderer 캘리브레이션 검토의 입력입니다.
+
+## Style Profile 추출
+
+API 호출 없이 schema-valid 로컬 style profile을 만들려면 mock client를 사용합니다.
+
+```bash
+python -m tools.style_lab.cli extract-profile \
+  --client mock \
+  --input-root image/style-lab/default_pretty_handwriting/v1 \
+  --reference-image-root image/clean_solutions \
+  --output-path image/style-lab/default_pretty_handwriting/v1/style_profile.generated.json
+```
+
+실제 GPT-5.5 분석이 필요할 때만 OpenAI client를 명시합니다. 이 경로는 OpenAI Responses API를 호출하며 `OPENAI_API_KEY`가 필요합니다.
+
+```bash
+python -m tools.style_lab.cli extract-profile \
+  --client openai \
+  --input-root image/style-lab/default_pretty_handwriting/v1 \
+  --reference-image-root image/clean_solutions \
+  --output-path image/style-lab/default_pretty_handwriting/v1/style_profile.generated.json
+```
+
+OpenAI smoke test는 명시적으로 opt-in할 때만 실행합니다.
+
+```bash
+CLEANSOLVE_RUN_OPENAI_STYLE_SMOKE=1 \
+python -m pytest tools/style_lab/tests/test_openai_style_profile_smoke.py -q
+```
+
 ## 산출물
 
 기본 산출물 위치는 `image/style-lab/default_pretty_handwriting/v1`입니다.
@@ -27,11 +58,12 @@ python -m tools.style_lab.cli build \
 - `calibration_manifest.json`
 - `style_tokens.skeleton.json`
 - `metrics.csv`
+- `style_profile.generated.json`
 
-`image/`는 gitignore 대상이므로 위 산출물은 저장소에 커밋하지 않습니다.
+`/image` 아래 산출물은 gitignore 대상이므로 저장소에 커밋하지 않습니다.
 
 ## 범위
 
 이번 도구는 레퍼런스 계약과 산출물 생성을 담당합니다.
 
-다음 작업은 이 산출물을 입력으로 삼아 GPT-5.5 스타일 프로필 추출과 renderer 파라미터 튜닝을 진행합니다.
+다음 작업은 이 산출물과 생성된 style profile을 검토 입력으로 삼아 renderer 파라미터 튜닝을 진행합니다.

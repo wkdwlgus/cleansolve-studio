@@ -86,3 +86,15 @@ python -m tools.style_lab.cli build \
 - `image/style-lab/default_pretty_handwriting/v1/metrics.csv`
 
 이 산출물은 `/image` 아래에 생성되므로 git에 커밋하지 않는다.
+
+## GPT-5.5 Style Profile Extraction
+
+Style Profile Extraction의 설계 기준은 [design spec](../superpowers/specs/2026-06-21-style-profile-extraction-design.md)과 [implementation plan](../superpowers/plans/2026-06-21-style-profile-extraction.md)을 따른다.
+
+Style Lab deterministic 산출물을 만든 뒤 `extract-profile` 명령으로 `default_pretty_handwriting v1`의 style profile 초안을 생성할 수 있다. 생성 파일 경로는 다음과 같다.
+
+```text
+image/style-lab/default_pretty_handwriting/v1/style_profile.generated.json
+```
+
+이 파일은 다음 renderer calibration milestone의 검토 입력이다. 이번 단계는 renderer preset을 갱신하지 않으며, `assets/style-presets/default_pretty_handwriting/preset.json`에 token 값을 자동 적용하지 않는다.
