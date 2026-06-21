@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,12 +11,19 @@ from PIL import Image
 from tools.style_lab.style_profile_schema import validate_style_profile
 
 
-def run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
+def run_cli(args: list[str], *, env_overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    for key in list(env):
+        if key.startswith("OPENAI_") or key == "CLEANSOLVE_RUN_OPENAI_STYLE_SMOKE":
+            env.pop(key)
+    if env_overrides:
+        env.update(env_overrides)
     return subprocess.run(
         [sys.executable, "-m", "tools.style_lab.cli", *args],
         check=False,
         capture_output=True,
         text=True,
+        env=env,
     )
 
 
