@@ -62,21 +62,31 @@ def _validate_artifact_paths(artifacts: dict[str, str]) -> None:
         raise StyleLabInputError(f"artifact path is not a file: {', '.join(invalid)}")
 
 
+def _parse_positive_int(value: object, option_name: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise StyleLabInputError(f"{option_name} must be an integer: {value}") from exc
+    if parsed <= 0:
+        raise StyleLabInputError(f"{option_name} must be greater than 0")
+    return parsed
+
+
 def _validate_output_options(
     args: argparse.Namespace,
     output_root: Path,
     artifacts: dict[str, str],
-) -> None:
+) -> tuple[int, int, int]:
     _validate_existing_ancestors(output_root)
     if output_root.exists() and not output_root.is_dir():
         raise StyleLabInputError(f"output root is not a directory: {output_root}")
     for artifact_path in artifacts.values():
         _validate_existing_ancestors(Path(artifact_path).parent)
     _validate_artifact_paths(artifacts)
-    if args.columns <= 0:
-        raise StyleLabInputError("columns must be greater than 0")
-    if args.contact_sheet_width <= 0 or args.contact_sheet_height <= 0:
-        raise StyleLabInputError("contact sheet dimensions must be greater than 0")
+    columns = _parse_positive_int(args.columns, "columns")
+    contact_sheet_width = _parse_positive_int(args.contact_sheet_width, "contact-sheet-width")
+    contact_sheet_height = _parse_positive_int(args.contact_sheet_height, "contact-sheet-height")
+    return columns, contact_sheet_width, contact_sheet_height
 
 
 def _compute_metrics(samples: list[ReferenceSample], image_root: Path) -> list[ImageMetric]:
@@ -97,7 +107,11 @@ def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
     extended_samples = [sample for sample in samples if sample.tier == "extended"]
     artifacts = _artifact_paths(output_root)
 
-    _validate_output_options(args, output_root, artifacts)
+    columns, contact_sheet_width, contact_sheet_height = _validate_output_options(
+        args,
+        output_root,
+        artifacts,
+    )
     _validate_sample_files(samples, image_root)
     metrics = _compute_metrics(samples, image_root)
     write_metrics_csv(metrics, Path(artifacts["metrics"]))
@@ -108,18 +122,18 @@ def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
             image_root=image_root,
             output_path=Path(artifacts["core_contact_sheet"]),
             title=f"{args.preset_id} {args.preset_version} core reference set",
-            cell_width=args.contact_sheet_width,
-            cell_height=args.contact_sheet_height,
-            columns=args.columns,
+            cell_width=contact_sheet_width,
+            cell_height=contact_sheet_height,
+            columns=columns,
         )
         build_contact_sheet(
             samples=extended_samples,
             image_root=image_root,
             output_path=Path(artifacts["extended_contact_sheet"]),
             title=f"{args.preset_id} {args.preset_version} extended calibration set",
-            cell_width=args.contact_sheet_width,
-            cell_height=args.contact_sheet_height,
-            columns=args.columns,
+            cell_width=contact_sheet_width,
+            cell_height=contact_sheet_height,
+            columns=columns,
         )
     except (OSError, UnidentifiedImageError) as exc:
         raise StyleLabInputError(f"unreadable reference image while building contact sheets: {exc}") from exc
@@ -160,9 +174,9 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--output-root", default="image/style-lab/default_pretty_handwriting/v1")
     build.add_argument("--preset-id", default="default_pretty_handwriting")
     build.add_argument("--preset-version", default="v1")
-    build.add_argument("--contact-sheet-width", type=int, default=320)
-    build.add_argument("--contact-sheet-height", type=int, default=460)
-    build.add_argument("--columns", type=int, default=5)
+    build.add_argument("--contact-sheet-width", default="320")
+    build.add_argument("--contact-sheet-height", default="460")
+    build.add_argument("--columns", default="5")
     return parser
 
 

@@ -156,6 +156,60 @@ def test_cli_build_validates_columns_before_writing_artifacts(
     assert not any(output_root.glob("*"))
 
 
+def test_cli_build_returns_style_lab_error_for_non_integer_columns(
+    tmp_path, approved_reference_image_root
+):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tools.style_lab.cli",
+            "build",
+            "--image-root",
+            str(approved_reference_image_root),
+            "--output-root",
+            str(tmp_path / "out"),
+            "--columns",
+            "abc",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("Style Lab input error:")
+    assert "columns" in result.stderr
+    assert "usage:" not in result.stderr
+
+
+def test_cli_build_returns_style_lab_error_for_non_integer_dimension(
+    tmp_path, approved_reference_image_root
+):
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tools.style_lab.cli",
+            "build",
+            "--image-root",
+            str(approved_reference_image_root),
+            "--output-root",
+            str(tmp_path / "out"),
+            "--contact-sheet-width",
+            "wide",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("Style Lab input error:")
+    assert "contact-sheet-width" in result.stderr
+    assert "usage:" not in result.stderr
+
+
 def test_cli_build_rejects_artifact_path_directory_before_writing_partial_artifacts(
     tmp_path, approved_reference_image_root
 ):
