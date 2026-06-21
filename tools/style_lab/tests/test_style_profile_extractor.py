@@ -47,19 +47,24 @@ def make_extraction_input(
     tmp_path: Path,
     *,
     omit_core_sheet: bool = False,
+    metrics_summary: dict[str, object] | None = None,
     reference_root_exists: bool = True,
     reference_ids: list[str] | None = None,
+    model: str = "gpt-5.5",
+    image_detail: str = "original",
 ) -> StyleProfileExtractionInput:
     input_root = tmp_path / "style-lab"
     input_root.mkdir()
     if not omit_core_sheet:
         create_rgb_image(input_root / "core_contact_sheet.jpg")
+    if metrics_summary is None:
+        metrics_summary = {"max_ink_sample_id": "GT_132", "max_color_sample_id": "GT_135"}
     (input_root / "calibration_manifest.json").write_text(
         json.dumps(
             {
                 "core_sample_count": 19,
                 "extended_sample_count": 26,
-                "metrics_summary": {"max_ink_sample_id": "GT_132", "max_color_sample_id": "GT_135"},
+                "metrics_summary": metrics_summary,
             }
         ),
         encoding="utf-8",
@@ -89,8 +94,8 @@ def make_extraction_input(
         input_root=input_root,
         reference_image_root=reference_image_root,
         output_path=tmp_path / "style_profile.generated.json",
-        model="gpt-5.5",
-        image_detail="original",
+        model=model,
+        image_detail=image_detail,
         max_reference_images=4,
     )
 
@@ -107,7 +112,32 @@ def test_mock_extractor_returns_deterministic_valid_profile(tmp_path):
     profile = MockStyleProfileExtractor().extract(extraction_input)
     validate_style_profile(profile)
     assert profile["preset_id"] == "default_pretty_handwriting"
-    assert "max_ink_sample_id=" in " ".join(profile["reference_summary"]["visual_coverage_notes"])
+    assert profile["reference_summary"]["visual_coverage_notes"] == [
+        "max_ink_sample_id=GT_132",
+        "max_color_sample_id=GT_135",
+    ]
+
+
+def test_mock_extractor_uses_manifest_metrics_summary_notes(tmp_path):
+    extraction_input = make_extraction_input(
+        tmp_path,
+        metrics_summary={"max_ink_sample_id": "GT_024", "max_color_sample_id": "GT_049"},
+    )
+
+    profile = MockStyleProfileExtractor().extract(extraction_input)
+
+    assert profile["reference_summary"]["visual_coverage_notes"] == [
+        "max_ink_sample_id=GT_024",
+        "max_color_sample_id=GT_049",
+    ]
+
+
+def test_mock_extractor_reports_missing_metrics_summary(tmp_path):
+    extraction_input = make_extraction_input(tmp_path, metrics_summary={})
+
+    profile = MockStyleProfileExtractor().extract(extraction_input)
+
+    assert profile["reference_summary"]["visual_coverage_notes"] == ["metrics_summary_unavailable"]
 
 
 def test_missing_required_artifact_raises_style_lab_error(tmp_path):
@@ -173,6 +203,32 @@ def test_openai_request_contains_messages_images_and_schema(tmp_path):
     assert request["timeout"] == 90
     assert count_request_images(request) == 3
     assert request["input"][1]["content"][1]["detail"] == "auto"
+
+
+def test_openai_extractor_rejects_empty_api_key():
+    with pytest.raises(StyleLabInputError, match="OpenAI API key is required for style profile extraction"):
+        OpenAIStyleProfileExtractor(api_key="", client=FakeOpenAIClient(build_mock_style_profile()), timeout_seconds=90)
+
+
+def test_openai_extractor_rejects_empty_model(tmp_path):
+    extraction_input = make_extraction_input(tmp_path, model="")
+    with pytest.raises(StyleLabInputError, match="OpenAI style profile model is required"):
+        OpenAIStyleProfileExtractor(api_key="test-key", client=FakeOpenAIClient(build_mock_style_profile()), timeout_seconds=90).extract(
+            extraction_input
+        )
+
+
+def test_openai_extractor_rejects_invalid_image_detail(tmp_path):
+    extraction_input = make_extraction_input(tmp_path, image_detail="full")
+    with pytest.raises(StyleLabInputError, match="image-detail must be one of low, high, auto, original"):
+        OpenAIStyleProfileExtractor(api_key="test-key", client=FakeOpenAIClient(build_mock_style_profile()), timeout_seconds=90).extract(
+            extraction_input
+        )
+
+
+def test_openai_extractor_rejects_invalid_timeout():
+    with pytest.raises(StyleLabInputError, match="timeout-seconds must be greater than 0"):
+        OpenAIStyleProfileExtractor(api_key="test-key", client=FakeOpenAIClient(build_mock_style_profile()), timeout_seconds=0)
 
 
 def test_invalid_json_response_is_wrapped(tmp_path):
