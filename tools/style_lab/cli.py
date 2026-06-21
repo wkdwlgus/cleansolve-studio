@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -50,11 +51,16 @@ def _validate_sample_files(samples: list[ReferenceSample], image_root: Path) -> 
 
 
 def _validate_existing_ancestors(path: Path) -> None:
+    current = _nearest_existing_path(path)
+    if current.exists() and not current.is_dir():
+        raise StyleLabInputError(f"output path parent is not a directory: {current}")
+
+
+def _nearest_existing_path(path: Path) -> Path:
     current = path
     while not current.exists() and current != current.parent:
         current = current.parent
-    if current.exists() and not current.is_dir():
-        raise StyleLabInputError(f"output path parent is not a directory: {current}")
+    return current
 
 
 def _validate_artifact_paths(artifacts: dict[str, str]) -> None:
@@ -65,6 +71,28 @@ def _validate_artifact_paths(artifacts: dict[str, str]) -> None:
     ]
     if invalid:
         raise StyleLabInputError(f"artifact path is not a file: {', '.join(invalid)}")
+
+
+def _validate_writable_directory(path: Path, label: str) -> None:
+    if not os.access(path, os.W_OK | os.X_OK):
+        raise StyleLabInputError(f"{label} is not writable: {path}")
+
+
+def _validate_output_permissions(output_root: Path, artifacts: dict[str, str]) -> None:
+    if output_root.exists():
+        _validate_writable_directory(output_root, "output root")
+    else:
+        nearest_output_parent = _nearest_existing_path(output_root.parent)
+        _validate_writable_directory(nearest_output_parent, "output root parent")
+
+    for artifact in artifacts.values():
+        artifact_path = Path(artifact)
+        if artifact_path.exists():
+            if not os.access(artifact_path, os.W_OK):
+                raise StyleLabInputError(f"artifact path is not writable: {artifact_path}")
+        else:
+            nearest_artifact_parent = _nearest_existing_path(artifact_path.parent)
+            _validate_writable_directory(nearest_artifact_parent, "artifact parent")
 
 
 def _parse_positive_int(value: object, option_name: str) -> int:
@@ -88,6 +116,7 @@ def _validate_output_options(
     for artifact_path in artifacts.values():
         _validate_existing_ancestors(Path(artifact_path).parent)
     _validate_artifact_paths(artifacts)
+    _validate_output_permissions(output_root, artifacts)
     columns = _parse_positive_int(args.columns, "columns")
     contact_sheet_width = _parse_positive_int(args.contact_sheet_width, "contact-sheet-width")
     contact_sheet_height = _parse_positive_int(args.contact_sheet_height, "contact-sheet-height")
@@ -119,7 +148,10 @@ def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
     )
     _validate_sample_files(samples, image_root)
     metrics = _compute_metrics(samples, image_root)
-    write_metrics_csv(metrics, Path(artifacts["metrics"]))
+    try:
+        write_metrics_csv(metrics, Path(artifacts["metrics"]))
+    except OSError as exc:
+        raise StyleLabInputError(f"failed to write output artifact {artifacts['metrics']}: {exc}") from exc
 
     try:
         build_contact_sheet(
@@ -131,6 +163,14 @@ def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
             cell_height=contact_sheet_height,
             columns=columns,
         )
+    except UnidentifiedImageError as exc:
+        raise StyleLabInputError(f"unreadable reference image while building core contact sheet: {exc}") from exc
+    except OSError as exc:
+        raise StyleLabInputError(
+            f"failed to write output artifact {artifacts['core_contact_sheet']}: {exc}"
+        ) from exc
+
+    try:
         build_contact_sheet(
             samples=extended_samples,
             image_root=image_root,
@@ -140,8 +180,14 @@ def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
             cell_height=contact_sheet_height,
             columns=columns,
         )
-    except (OSError, UnidentifiedImageError) as exc:
-        raise StyleLabInputError(f"unreadable reference image while building contact sheets: {exc}") from exc
+    except UnidentifiedImageError as exc:
+        raise StyleLabInputError(
+            f"unreadable reference image while building extended contact sheet: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise StyleLabInputError(
+            f"failed to write output artifact {artifacts['extended_contact_sheet']}: {exc}"
+        ) from exc
 
     manifest = build_calibration_manifest(
         preset_id=args.preset_id,
@@ -150,14 +196,24 @@ def build_style_lab(args: argparse.Namespace) -> dict[str, object]:
         metrics=metrics,
         artifacts=artifacts,
     )
-    write_json(manifest, Path(artifacts["calibration_manifest"]))
+    try:
+        write_json(manifest, Path(artifacts["calibration_manifest"]))
+    except OSError as exc:
+        raise StyleLabInputError(
+            f"failed to write output artifact {artifacts['calibration_manifest']}: {exc}"
+        ) from exc
     skeleton = build_style_token_skeleton(
         preset_id=args.preset_id,
         preset_version=args.preset_version,
         core_count=len(CORE_SAMPLE_IDS),
         extended_count=len(EXTENDED_SAMPLE_IDS),
     )
-    write_json(skeleton, Path(artifacts["style_tokens"]))
+    try:
+        write_json(skeleton, Path(artifacts["style_tokens"]))
+    except OSError as exc:
+        raise StyleLabInputError(
+            f"failed to write output artifact {artifacts['style_tokens']}: {exc}"
+        ) from exc
 
     return {
         "status": "ok",

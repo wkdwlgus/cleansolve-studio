@@ -1,8 +1,10 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 
@@ -277,6 +279,81 @@ def test_cli_build_rejects_artifact_path_directory_before_writing_partial_artifa
     assert "extended_contact_sheet.jpg" in result.stderr
     assert "Traceback" not in result.stderr
     assert {path.name for path in output_root.iterdir()} == existing_entries
+
+
+def test_cli_build_rejects_non_writable_output_root_before_writing_artifacts(
+    tmp_path, approved_reference_image_root
+):
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    output_root.chmod(0o500)
+    if os.access(output_root, os.W_OK):
+        output_root.chmod(0o700)
+        pytest.skip("chmod did not make output_root non-writable on this platform")
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tools.style_lab.cli",
+                "build",
+                "--image-root",
+                str(approved_reference_image_root),
+                "--output-root",
+                str(output_root),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        output_root.chmod(0o700)
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("Style Lab input error:")
+    assert str(output_root) in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not any(output_root.iterdir())
+
+
+def test_cli_build_rejects_non_writable_artifact_file_before_writing_partial_artifacts(
+    tmp_path, approved_reference_image_root
+):
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    artifact = output_root / "extended_contact_sheet.jpg"
+    artifact.write_bytes(b"existing")
+    artifact.chmod(0o400)
+    if os.access(artifact, os.W_OK):
+        artifact.chmod(0o600)
+        pytest.skip("chmod did not make artifact file non-writable on this platform")
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tools.style_lab.cli",
+                "build",
+                "--image-root",
+                str(approved_reference_image_root),
+                "--output-root",
+                str(output_root),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        artifact.chmod(0o600)
+
+    assert result.returncode == 2
+    assert result.stderr.startswith("Style Lab input error:")
+    assert "extended_contact_sheet.jpg" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert {path.name for path in output_root.iterdir()} == {"extended_contact_sheet.jpg"}
+    assert artifact.read_bytes() == b"existing"
 
 
 def test_cli_build_returns_code_2_when_nested_output_parent_is_file(
