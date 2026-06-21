@@ -69,3 +69,21 @@ def test_schema_field_definitions_are_not_shared_mutable_objects():
     assert black_width is not blue_width
     assert black_width is not fraction_width
     assert black_width is not annotation_width
+
+
+def test_structured_output_value_constraints_have_explicit_types():
+    missing_paths: list[str] = []
+
+    def visit(node: object, path: str) -> None:
+        if isinstance(node, dict):
+            if ("const" in node or "enum" in node) and "type" not in node:
+                missing_paths.append(path)
+            for key, value in node.items():
+                visit(value, f"{path}.{key}" if path else str(key))
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                visit(value, f"{path}[{index}]")
+
+    visit(STYLE_PROFILE_SCHEMA, "STYLE_PROFILE_SCHEMA")
+
+    assert missing_paths == []
