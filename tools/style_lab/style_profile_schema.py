@@ -10,6 +10,7 @@ from tools.style_lab.models import StyleLabInputError
 STYLE_PROFILE_SCHEMA_NAME = "style_profile_v1"
 
 _NON_EMPTY_STRING = {"type": "string", "minLength": 1}
+_STRING = {"type": "string"}
 _HEX_COLOR = {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}
 _RATIO = {"type": "number", "minimum": 0.5, "maximum": 2}
 _WIDTH = {"type": "number", "minimum": 0.5, "maximum": 8}
@@ -52,8 +53,8 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
             "properties": {
                 "core_sample_count": {"type": "integer", "const": 19},
                 "extended_sample_count": {"type": "integer", "const": 26},
-                "input_artifacts": {"type": "array", "items": _NON_EMPTY_STRING},
-                "visual_coverage_notes": {"type": "array", "items": _NON_EMPTY_STRING},
+                "input_artifacts": {"type": "array", "items": _STRING},
+                "visual_coverage_notes": {"type": "array", "items": _STRING},
             },
         },
         "style_description": {
@@ -169,8 +170,8 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                 "required": ["target", "recommendation", "reason", "priority"],
                 "properties": {
                     "target": {"enum": ["stroke", "text", "formula", "diagram", "palette", "layout"]},
-                    "recommendation": _NON_EMPTY_STRING,
-                    "reason": _NON_EMPTY_STRING,
+                    "recommendation": _STRING,
+                    "reason": _STRING,
                     "priority": {"enum": ["high", "medium", "low"]},
                 },
             },
@@ -188,7 +189,7 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                 "style_similarity_threshold": _UNIT_INTERVAL,
                 "max_visual_diff_ratio": _UNIT_INTERVAL,
                 "requires_human_review_if_below": _UNIT_INTERVAL,
-                "notes": {"type": "array", "items": _NON_EMPTY_STRING},
+                "notes": {"type": "array", "items": _STRING},
             },
         },
         "uncertainties": {
@@ -198,8 +199,8 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "required": ["field", "reason", "needs_human_review"],
                 "properties": {
-                    "field": _NON_EMPTY_STRING,
-                    "reason": _NON_EMPTY_STRING,
+                    "field": _STRING,
+                    "reason": _STRING,
                     "needs_human_review": {"type": "boolean"},
                 },
             },

@@ -36,3 +36,20 @@ def test_needs_review_requires_uncertainty():
     profile["uncertainties"] = []
     with pytest.raises(StyleLabInputError, match="needs_review requires at least one uncertainty"):
         validate_style_profile(profile)
+
+
+def test_only_style_description_strings_require_content():
+    profile = build_mock_style_profile()
+    profile["reference_summary"]["input_artifacts"] = [""]
+    profile["reference_summary"]["visual_coverage_notes"] = [""]
+    profile["renderer_recommendations"][0]["recommendation"] = ""
+    profile["renderer_recommendations"][0]["reason"] = ""
+    profile["quality_gates"]["notes"] = [""]
+    profile["status"] = "needs_review"
+    profile["uncertainties"] = [{"field": "", "reason": "", "needs_human_review": True}]
+
+    validate_style_profile(profile)
+
+    profile["style_description"]["overall"] = ""
+    with pytest.raises(StyleLabInputError, match="style profile schema validation failed"):
+        validate_style_profile(profile)
