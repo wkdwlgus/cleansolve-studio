@@ -1,7 +1,11 @@
 import pytest
 
 from tools.style_lab.models import StyleLabInputError
-from tools.style_lab.style_profile_schema import build_mock_style_profile, validate_style_profile
+from tools.style_lab.style_profile_schema import (
+    STYLE_PROFILE_SCHEMA,
+    build_mock_style_profile,
+    validate_style_profile,
+)
 
 
 def test_valid_style_profile_passes_validation():
@@ -53,3 +57,15 @@ def test_only_style_description_strings_require_content():
     profile["style_description"]["overall"] = ""
     with pytest.raises(StyleLabInputError, match="style profile schema validation failed"):
         validate_style_profile(profile)
+
+
+def test_schema_field_definitions_are_not_shared_mutable_objects():
+    tokens = STYLE_PROFILE_SCHEMA["properties"]["tokens"]["properties"]
+    black_width = tokens["stroke"]["properties"]["black_width_px"]
+    blue_width = tokens["stroke"]["properties"]["blue_width_px"]
+    fraction_width = tokens["formula"]["properties"]["fraction_bar_width_px"]
+    annotation_width = tokens["diagram"]["properties"]["annotation_line_width_px"]
+
+    assert black_width is not blue_width
+    assert black_width is not fraction_width
+    assert black_width is not annotation_width

@@ -9,14 +9,36 @@ from tools.style_lab.models import StyleLabInputError
 
 STYLE_PROFILE_SCHEMA_NAME = "style_profile_v1"
 
-_NON_EMPTY_STRING = {"type": "string", "minLength": 1}
-_STRING = {"type": "string"}
-_HEX_COLOR = {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}
-_RATIO = {"type": "number", "minimum": 0.5, "maximum": 2}
-_WIDTH = {"type": "number", "minimum": 0.5, "maximum": 8}
-_JITTER = {"type": "number", "minimum": 0, "maximum": 12}
-_UNIT_INTERVAL = {"type": "number", "minimum": 0, "maximum": 1}
-_ANGLE = {"type": "number", "minimum": -20, "maximum": 20}
+def _non_empty_string() -> dict[str, object]:
+    return {"type": "string", "minLength": 1}
+
+
+def _string() -> dict[str, object]:
+    return {"type": "string"}
+
+
+def _hex_color() -> dict[str, object]:
+    return {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}
+
+
+def _ratio() -> dict[str, object]:
+    return {"type": "number", "minimum": 0.5, "maximum": 2}
+
+
+def _width() -> dict[str, object]:
+    return {"type": "number", "minimum": 0.5, "maximum": 8}
+
+
+def _jitter() -> dict[str, object]:
+    return {"type": "number", "minimum": 0, "maximum": 12}
+
+
+def _unit_interval() -> dict[str, object]:
+    return {"type": "number", "minimum": 0, "maximum": 1}
+
+
+def _angle() -> dict[str, object]:
+    return {"type": "number", "minimum": -20, "maximum": 20}
 
 STYLE_PROFILE_SCHEMA: dict[str, Any] = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -53,8 +75,8 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
             "properties": {
                 "core_sample_count": {"type": "integer", "const": 19},
                 "extended_sample_count": {"type": "integer", "const": 26},
-                "input_artifacts": {"type": "array", "items": _STRING},
-                "visual_coverage_notes": {"type": "array", "items": _STRING},
+                "input_artifacts": {"type": "array", "items": _string()},
+                "visual_coverage_notes": {"type": "array", "items": _string()},
             },
         },
         "style_description": {
@@ -69,12 +91,12 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                 "spacing_and_layout",
             ],
             "properties": {
-                "overall": _NON_EMPTY_STRING,
-                "korean_text": _NON_EMPTY_STRING,
-                "formula": _NON_EMPTY_STRING,
-                "diagram_annotations": _NON_EMPTY_STRING,
-                "color_usage": _NON_EMPTY_STRING,
-                "spacing_and_layout": _NON_EMPTY_STRING,
+                "overall": _non_empty_string(),
+                "korean_text": _non_empty_string(),
+                "formula": _non_empty_string(),
+                "diagram_annotations": _non_empty_string(),
+                "color_usage": _non_empty_string(),
+                "spacing_and_layout": _non_empty_string(),
             },
         },
         "tokens": {
@@ -93,10 +115,10 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                         "opacity",
                     ],
                     "properties": {
-                        "black_width_px": _WIDTH,
-                        "blue_width_px": _WIDTH,
-                        "red_width_px": _WIDTH,
-                        "jitter_px": _JITTER,
+                        "black_width_px": _width(),
+                        "blue_width_px": _width(),
+                        "red_width_px": _width(),
+                        "jitter_px": _jitter(),
                         "opacity": {"type": "number", "minimum": 0.1, "maximum": 1},
                     },
                 },
@@ -110,10 +132,10 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                         "size_ratio_to_formula",
                     ],
                     "properties": {
-                        "korean_baseline_jitter_px": _JITTER,
+                        "korean_baseline_jitter_px": _jitter(),
                         "letter_spacing_px": {"type": "number"},
-                        "line_height_ratio": _RATIO,
-                        "size_ratio_to_formula": _RATIO,
+                        "line_height_ratio": _ratio(),
+                        "size_ratio_to_formula": _ratio(),
                     },
                 },
                 "formula": {
@@ -126,10 +148,10 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                         "vertical_compactness",
                     ],
                     "properties": {
-                        "baseline_jitter_px": _JITTER,
-                        "fraction_bar_width_px": _WIDTH,
-                        "symbol_slant_deg": _ANGLE,
-                        "vertical_compactness": _RATIO,
+                        "baseline_jitter_px": _jitter(),
+                        "fraction_bar_width_px": _width(),
+                        "symbol_slant_deg": _angle(),
+                        "vertical_compactness": _ratio(),
                     },
                 },
                 "diagram": {
@@ -143,9 +165,9 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                     ],
                     "properties": {
                         "label_offset_px": {"type": "number", "minimum": 0},
-                        "annotation_line_width_px": _WIDTH,
+                        "annotation_line_width_px": _width(),
                         "hatching_gap_px": {"type": "number", "minimum": 2, "maximum": 40},
-                        "hatching_angle_jitter_deg": _ANGLE,
+                        "hatching_angle_jitter_deg": _angle(),
                     },
                 },
                 "palette": {
@@ -153,9 +175,9 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                     "additionalProperties": False,
                     "required": ["black", "blue", "red_orange"],
                     "properties": {
-                        "black": _HEX_COLOR,
-                        "blue": _HEX_COLOR,
-                        "red_orange": _HEX_COLOR,
+                        "black": _hex_color(),
+                        "blue": _hex_color(),
+                        "red_orange": _hex_color(),
                     },
                 },
             },
@@ -170,8 +192,8 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                 "required": ["target", "recommendation", "reason", "priority"],
                 "properties": {
                     "target": {"enum": ["stroke", "text", "formula", "diagram", "palette", "layout"]},
-                    "recommendation": _STRING,
-                    "reason": _STRING,
+                    "recommendation": _string(),
+                    "reason": _string(),
                     "priority": {"enum": ["high", "medium", "low"]},
                 },
             },
@@ -186,10 +208,10 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                 "notes",
             ],
             "properties": {
-                "style_similarity_threshold": _UNIT_INTERVAL,
-                "max_visual_diff_ratio": _UNIT_INTERVAL,
-                "requires_human_review_if_below": _UNIT_INTERVAL,
-                "notes": {"type": "array", "items": _STRING},
+                "style_similarity_threshold": _unit_interval(),
+                "max_visual_diff_ratio": _unit_interval(),
+                "requires_human_review_if_below": _unit_interval(),
+                "notes": {"type": "array", "items": _string()},
             },
         },
         "uncertainties": {
@@ -199,8 +221,8 @@ STYLE_PROFILE_SCHEMA: dict[str, Any] = {
                 "additionalProperties": False,
                 "required": ["field", "reason", "needs_human_review"],
                 "properties": {
-                    "field": _STRING,
-                    "reason": _STRING,
+                    "field": _string(),
+                    "reason": _string(),
                     "needs_human_review": {"type": "boolean"},
                 },
             },
