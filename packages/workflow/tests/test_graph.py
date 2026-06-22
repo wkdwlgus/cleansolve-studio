@@ -209,7 +209,8 @@ def test_workflow_does_not_approve_unrelated_patch_when_endpoint_mismatch_remain
     )
 
     assert state["status"] == "REVISION_REQUIRED"
-    assert state["revision_attempts"] == 2
+    assert state["revision_attempts"] == 1
+    assert state["review_tool_decisions"][-1].reason_code == "repeated_element_patch"
     assert state["inspection_issue"]["type"] == "dimension_endpoint_mismatch"
     assert state["candidate_spec"].elements[0].geometry["target_anchor_end"] != [540, 850]
     assert state["correction_plans"][-1]["actions"][0]["patch"] == {

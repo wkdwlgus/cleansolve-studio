@@ -49,7 +49,14 @@ def build_graph():
         },
     )
     graph.add_edge("plan_correction", "apply_correction")
-    graph.add_edge("apply_correction", "validate_spec")
+    graph.add_conditional_edges(
+        "apply_correction",
+        _route_after_correction,
+        {
+            "validate_spec": "validate_spec",
+            "require_revision": "require_revision",
+        },
+    )
     graph.add_edge("decide_human_review", END)
     graph.add_edge("require_revision", END)
     return graph.compile()
@@ -127,3 +134,15 @@ def _route_after_inspection(state: WorkflowState) -> str:
     if latest_decision.tool_name in {"request_handwriting_asset", "escalate_hitl"}:
         return "require_revision"
     return "require_revision"
+
+
+def _route_after_correction(state: WorkflowState) -> str:
+    decisions = state.get("review_tool_decisions", [])
+    latest_decision = decisions[-1] if decisions else None
+    if (
+        latest_decision is not None
+        and latest_decision.tool_name == "escalate_hitl"
+        and latest_decision.reason_code == "repeated_element_patch"
+    ):
+        return "require_revision"
+    return "validate_spec"

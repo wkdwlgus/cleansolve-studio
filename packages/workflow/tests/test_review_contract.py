@@ -87,6 +87,42 @@ def test_progress_event_initializes_missing_progress_events_list():
     assert state["progress_events"][0].event_id == "evt_0000"
 
 
+@pytest.mark.parametrize(
+    ("status", "phase", "message", "next_action"),
+    [
+        (
+            "SPEC_REVALIDATING",
+            "validation",
+            "candidate spec 계약을 검증하고 있습니다.",
+            "continue",
+        ),
+        (
+            "RE_RENDERING",
+            "render",
+            "수정된 spec으로 preview를 다시 렌더링하고 있습니다.",
+            "rerender",
+        ),
+    ],
+)
+def test_progress_event_accepts_revalidation_and_rerender_statuses(
+    status,
+    phase,
+    message,
+    next_action,
+):
+    state = base_state()
+
+    append_progress_event(
+        state,
+        phase=phase,
+        status=status,
+        message=message,
+        next_action=next_action,
+    )
+
+    assert state["progress_events"][0].status == status
+
+
 def test_gate_passes_when_all_thresholds_met():
     result = evaluate_approval_gate(
         scores=APPROVED_SCORE_FIXTURE,

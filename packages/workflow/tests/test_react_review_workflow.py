@@ -80,12 +80,24 @@ def test_react_workflow_rejects_repeated_unhelpful_patch():
     )
 
     assert state["status"] == "REVISION_REQUIRED"
-    assert state["revision_attempts"] == 2
+    assert state["revision_attempts"] == 1
     assert state["review_tool_decisions"][-1].reason_code in {
         "repeated_element_patch",
         "revision_budget_exceeded",
     }
     assert state["candidate_spec"].elements[0].geometry["target_anchor_end"] != [540, 850]
+
+
+def test_react_workflow_unsupported_patch_does_not_count_as_revision():
+    state = run_mock_workflow(
+        job_id="job_react_unsupported_patch",
+        correction_patch_override={"style.color": "blue"},
+    )
+
+    assert state["status"] == "REVISION_REQUIRED"
+    assert state["revision_attempts"] == 0
+    assert state["candidate_spec"].elements[0].revision_history == []
+    assert state["review_tool_decisions"][-1].reason_code == "repeated_element_patch"
 
 
 def test_react_workflow_validation_failure_has_contract_invalid_gate():

@@ -35,6 +35,7 @@ ProgressStatus = Literal[
     "STYLE_PRESET_LOADED",
     "SPEC_EXTRACTED",
     "SPEC_VALIDATING",
+    "SPEC_REVALIDATING",
     "RENDERING",
     "RENDERED",
     "INSPECTING_CONTENT",

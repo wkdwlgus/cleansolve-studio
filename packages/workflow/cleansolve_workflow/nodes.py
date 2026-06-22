@@ -1,5 +1,4 @@
 from copy import deepcopy
-from datetime import UTC, datetime
 from pathlib import Path
 
 from cleansolve_ai import AnalysisClient, build_analysis_client
@@ -12,8 +11,6 @@ from cleansolve_workflow.review_contract import (
     DEFAULT_APPROVAL_GATE,
     MISMATCH_SCORE_FIXTURE,
     CorrectionAction,
-    GateResult,
-    ProgressEvent,
     ReviewAttempt,
     ReviewIssue,
     ToolDecision,
@@ -265,13 +262,26 @@ def apply_correction(state: WorkflowState) -> WorkflowState:
     _set_status(state, "PATCHING_SPEC", next_action="spec_patch")
     candidate_spec = deepcopy(state["candidate_spec"])
     plan = state["correction_plans"][-1]
+    changed = False
 
     for action in plan["actions"]:
         if action["type"] != "spec_patch":
             continue
-        _apply_spec_patch(candidate_spec, action["element_id"], action["patch"])
+        changed = _apply_spec_patch(candidate_spec, action["element_id"], action["patch"]) or changed
 
     state["candidate_spec"] = candidate_spec
+    if not changed:
+        decision = ToolDecision(
+            attempt=state.get("revision_attempts", 0),
+            tool_name="escalate_hitl",
+            reason_code="repeated_element_patch",
+            confidence=1.0,
+        )
+        state.setdefault("review_tool_decisions", []).append(decision)
+        if state.get("review_attempts"):
+            state["review_attempts"][-1].tool_decisions.append(decision)
+        return state
+
     state["revision_attempts"] = state.get("revision_attempts", 0) + 1
     _set_status(state, "RE_RENDERING", phase="render", next_action="rerender")
     state["rendered_preview"] = render_overlay_svg(candidate_spec)
@@ -344,21 +354,28 @@ def require_revision(state: WorkflowState) -> WorkflowState:
     return state
 
 
-def _apply_spec_patch(candidate_spec, element_id: str, patch: dict[str, object]) -> None:
+def _apply_spec_patch(candidate_spec, element_id: str, patch: dict[str, object]) -> bool:
     for element in candidate_spec.elements:
         if element.id != element_id:
             continue
+        applied_patch = {}
         for path, value in patch.items():
             if path.startswith("geometry."):
-                element.geometry[path.removeprefix("geometry.")] = value
+                geometry_key = path.removeprefix("geometry.")
+                if element.geometry.get(geometry_key) != value:
+                    element.geometry[geometry_key] = value
+                    applied_patch[path] = value
+        if not applied_patch:
+            return False
         element.revision_history.append(
             {
                 "revision_id": "rev_001",
                 "source": "auto_correction",
-                "patch": patch,
+                "patch": applied_patch,
             }
         )
-        return
+        return True
+    return False
 
 
 def _find_element(state: WorkflowState, element_id: str):
@@ -417,7 +434,7 @@ def _set_status(
 ) -> None:
     state["status"] = status
     state.setdefault("status_history", []).append(status)
-    _append_progress_event(
+    append_progress_event(
         state,
         phase=phase,
         status=status,
@@ -425,44 +442,3 @@ def _set_status(
         next_action=next_action,
         scores=scores,
     )
-
-
-def _append_progress_event(
-    state: WorkflowState,
-    *,
-    phase: str,
-    status: str,
-    message: str,
-    next_action: str,
-    scores=None,
-):
-    try:
-        return append_progress_event(
-            state,
-            phase=phase,
-            status=status,
-            message=message,
-            next_action=next_action,
-            scores=scores,
-        )
-    except ValueError:
-        if status not in {"SPEC_REVALIDATING", "RE_RENDERING"}:
-            raise
-
-    sequence = int(state["review_event_sequence"])
-    event = ProgressEvent.model_construct(
-        event_id=f"evt_{sequence:04d}",
-        job_id=state["job_id"],
-        sequence=sequence,
-        phase=phase,
-        status=status,
-        message=message,
-        attempt=state["revision_attempts"],
-        max_attempts=state["max_revision_attempts"],
-        scores=scores,
-        next_action=next_action,
-        created_at=datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-    )
-    state.setdefault("progress_events", []).append(event)
-    state["review_event_sequence"] = sequence + 1
-    return event
