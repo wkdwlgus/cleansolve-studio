@@ -30,6 +30,9 @@ def test_renderer_preserves_source_image_metadata():
     assert_xml_parseable(svg)
     assert 'data-problem-image-id="problem_v1"' in svg
     assert 'data-teacher-solution-image-id="solution_v1"' in svg
+    assert 'data-style-preset-id="default_pretty_handwriting"' in svg
+    assert 'data-style-preset-version="v1"' in svg
+    assert 'data-renderer-calibration-status="draft_needs_review"' in svg
 
 
 def test_renderer_renders_formula_line_and_text_note():
@@ -71,8 +74,139 @@ def test_renderer_renders_formula_line_and_text_note():
         'font-size="20" data-text-kind="formula_line">x &lt; y</text>'
     ) in svg
     assert 'data-primitive-type="text_note"' in svg
-    assert 'font-family="sans-serif"' in svg
-    assert ">check &amp; solve<" in svg
+    assert (
+        '<text x="50" y="70" fill="#222222" font-family="sans-serif" '
+        'font-size="16" letter-spacing="0.25" data-text-kind="text_note">check &amp; solve</text>'
+    ) in svg
+    assert 'data-line-height-ratio="1.32"' in svg
+
+
+def test_renderer_uses_calibrated_semantic_palette_and_strokes():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_arrow",
+                type="arrow",
+                color="blue",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 80, 20]),
+                bbox=[10, 10, 80, 20],
+                geometry={"start": [10, 20], "end": [90, 20]},
+            ),
+            Element(
+                id="el_box",
+                type="box",
+                color="red",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[20, 30, 100, 50]),
+                bbox=[20, 30, 100, 50],
+            ),
+            Element(
+                id="el_circle",
+                type="circle",
+                color="black",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[100, 120, 40, 60]),
+                bbox=[100, 120, 40, 60],
+            ),
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert '<line x1="10" y1="20" x2="90" y2="20" stroke="#34309A" stroke-width="2"' in svg
+    assert '<rect x="20" y="30" width="100" height="50" fill="none" stroke="#E1583E" stroke-width="2"' in svg
+    assert '<circle cx="120" cy="150" r="20" fill="none" stroke="#222222" stroke-width="2"' in svg
+
+
+def test_renderer_inline_style_overrides_calibration():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_arrow",
+                type="arrow",
+                color="blue",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 80, 20]),
+                bbox=[10, 10, 80, 20],
+                geometry={"start": [10, 20], "end": [90, 20]},
+                style={"stroke_width": 3.5},
+            ),
+            Element(
+                id="el_note",
+                type="text_note",
+                confidence=0.8,
+                evidence=Evidence(source="teacher_solution_image", bbox=[40, 50, 120, 40]),
+                bbox=[40, 50, 120, 40],
+                geometry={"anchor": [50, 70], "text": "note"},
+                style={"font_size": 21},
+            ),
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert 'stroke="#34309A" stroke-width="3.5"' in svg
+    assert 'font-size="21" letter-spacing="0.25" data-text-kind="text_note">note</text>' in svg
+
+
+def test_renderer_ignores_invalid_inline_style_values():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=300, height=200),
+        elements=[
+            Element(
+                id="el_arrow",
+                type="arrow",
+                color="blue",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 10, 80, 20]),
+                bbox=[10, 10, 80, 20],
+                geometry={"start": [10, 20], "end": [90, 20]},
+                style={"stroke_width": True},
+            ),
+            Element(
+                id="el_note",
+                type="text_note",
+                confidence=0.8,
+                evidence=Evidence(source="teacher_solution_image", bbox=[40, 50, 120, 40]),
+                bbox=[40, 50, 120, 40],
+                geometry={"anchor": [50, 70], "text": "note"},
+                style={"font_size": False},
+            ),
+            Element(
+                id="el_highlight",
+                type="highlight_line",
+                confidence=0.8,
+                evidence=Evidence(source="teacher_solution_image", bbox=[10, 90, 90, 20]),
+                bbox=[10, 90, 90, 20],
+                geometry={"start": [10, 100], "end": [100, 100]},
+                style={"opacity": False},
+            ),
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert 'stroke="#34309A" stroke-width="2"' in svg
+    assert 'font-size="16" letter-spacing="0.25" data-text-kind="text_note">note</text>' in svg
+    assert 'opacity="0.35"' in svg
 
 
 def test_renderer_renders_highlights_and_arrow():
@@ -189,11 +323,11 @@ def test_renderer_renders_box_circle_point_and_segment_labels():
     svg = render_overlay_svg(spec)
 
     assert_xml_parseable(svg)
-    assert '<rect x="20" y="30" width="100" height="50" fill="none" stroke="red"' in svg
+    assert '<rect x="20" y="30" width="100" height="50" fill="none" stroke="#E1583E"' in svg
     assert '<circle cx="120" cy="150" r="20" fill="none" stroke="green"' in svg
-    assert '<circle cx="15" cy="25" r="3" fill="blue" />' in svg
-    assert '<text x="23" y="17" fill="blue" font-family="sans-serif" font-size="14">A</text>' in svg
-    assert '<text x="80" y="90" fill="black" font-family="sans-serif" font-size="14">BC</text>' in svg
+    assert '<circle cx="15" cy="25" r="3" fill="#34309A" />' in svg
+    assert '<text x="22" y="18" fill="#34309A" font-family="sans-serif" font-size="14">A</text>' in svg
+    assert '<text x="80" y="90" fill="#222222" font-family="sans-serif" font-size="14">BC</text>' in svg
 
 
 def test_renderer_skips_malformed_and_unsupported_primitives_without_crashing():
