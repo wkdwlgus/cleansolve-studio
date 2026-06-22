@@ -10,7 +10,7 @@ from typing import Any, ClassVar, Literal
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 ImageRole = Literal["problem", "teacher_solution"]
 ImageMimeType = Literal["image/png", "image/jpeg"]
@@ -149,6 +149,26 @@ class JobManifest(BaseModel):
     latest_render_artifact_id: str | None = None
     export_artifacts: list[ExportArtifact] = Field(default_factory=list)
     latest_export_artifact_id: str | None = None
+
+    @field_validator("analysis_artifacts", mode="before")
+    @classmethod
+    def _normalize_analysis_artifacts(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        for artifact_type in ANALYSIS_ARTIFACT_TYPES:
+            normalized.setdefault(artifact_type, [])
+        return normalized
+
+    @field_validator("latest_analysis_artifact_ids", mode="before")
+    @classmethod
+    def _normalize_latest_analysis_artifact_ids(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        for artifact_type in ANALYSIS_ARTIFACT_TYPES:
+            normalized.setdefault(artifact_type, None)
+        return normalized
 
 
 def _utc_now() -> str:

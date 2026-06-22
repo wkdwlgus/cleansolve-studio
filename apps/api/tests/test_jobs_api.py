@@ -94,6 +94,20 @@ def test_run_with_openai_without_key_returns_502_and_marks_job_failed(monkeypatc
     assert job_response_payload["review_items"][-1]["type"] == "analysis_adapter_failed"
     assert job_response_payload["review_items"][-1]["retryable"] is True
     assert review_items_payload == {"items": []}
+    assert job_response_payload["analysis_artifacts"] == {
+        "candidate_spec": [],
+        "validation_report": [],
+        "correction_plan": [],
+        "review_correction": [],
+        "progress_events": [],
+    }
+    assert job_response_payload["latest_analysis_artifact_ids"] == {
+        "candidate_spec": None,
+        "validation_report": None,
+        "correction_plan": None,
+        "review_correction": None,
+        "progress_events": None,
+    }
     assert "jobs" not in str(response.json())
     assert "sk-" not in str(response.json())
 
@@ -454,6 +468,72 @@ def test_old_manifest_json_defaults_analysis_artifact_fields(tmp_path):
     assert manifest.latest_render_artifact_id is None
     assert manifest.export_artifacts == []
     assert manifest.latest_export_artifact_id is None
+
+
+def test_old_manifest_json_normalizes_partial_analysis_artifact_fields(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    job_id = "job_00000000000000000000000000000000"
+    job_root = tmp_path / "jobs" / job_id
+    job_root.mkdir(parents=True)
+    (job_root / "manifest.json").write_text(
+        f"""
+{{
+  "job_id": "job_00000000000000000000000000000000",
+  "status": "APPROVED",
+  "created_at": "2026-06-16T00:00:00Z",
+  "updated_at": "2026-06-16T00:00:00Z",
+  "revision_attempts": 1,
+  "review_items": [],
+  "image_artifacts": {{
+    "problem": [],
+    "teacher_solution": []
+  }},
+  "latest_image_artifact_ids": {{
+    "problem": null,
+    "teacher_solution": null
+  }},
+  "analysis_artifacts": {{
+    "candidate_spec": [
+      {{
+        "artifact_id": "spec_old",
+        "type": "candidate_spec",
+        "relative_path": "artifacts/specs/spec_old.json",
+        "size_bytes": 2,
+        "sha256": "{'a' * 64}",
+        "created_at": "2026-06-16T00:00:00Z",
+        "source_image_artifact_ids": {{
+          "problem": "img_problem_old",
+          "teacher_solution": "img_teacher_old"
+        }}
+      }}
+    ],
+    "validation_report": [],
+    "correction_plan": []
+  }},
+  "latest_analysis_artifact_ids": {{
+    "candidate_spec": "spec_old",
+    "validation_report": null,
+    "correction_plan": "correction_old"
+  }}
+}}
+""",
+        encoding="utf-8",
+    )
+
+    manifest = store.get_job(job_id)
+
+    assert manifest.analysis_artifacts["candidate_spec"][0].artifact_id == "spec_old"
+    assert manifest.analysis_artifacts["validation_report"] == []
+    assert manifest.analysis_artifacts["correction_plan"] == []
+    assert manifest.analysis_artifacts["review_correction"] == []
+    assert manifest.analysis_artifacts["progress_events"] == []
+    assert manifest.latest_analysis_artifact_ids == {
+        "candidate_spec": "spec_old",
+        "validation_report": None,
+        "correction_plan": "correction_old",
+        "review_correction": None,
+        "progress_events": None,
+    }
 
 
 def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
