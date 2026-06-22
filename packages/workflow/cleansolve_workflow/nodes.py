@@ -16,6 +16,7 @@ from cleansolve_workflow.review_contract import (
     ToolDecision,
     append_progress_event,
     evaluate_approval_gate,
+    has_score_improved,
 )
 
 from .state import WorkflowState
@@ -250,18 +251,31 @@ def plan_next_review_action(state: WorkflowState) -> ToolDecision:
     issues = state.get("latest_review_issues", [])
     has_auto_correctable_issue = any(issue.auto_correctable for issue in issues)
     if has_auto_correctable_issue and _has_revision_budget(state):
+        patch = state.get(
+            "correction_patch_override",
+            {"geometry.target_anchor_end": EXPECTED_TARGET_ANCHOR_END},
+        )
+        if _has_repeated_patch_attempt(state, "el_freehand_dimension_001", patch):
+            return ToolDecision(
+                attempt=attempt,
+                tool_name="escalate_hitl",
+                reason_code="repeated_element_patch",
+                confidence=1.0,
+            )
+        if _has_two_attempts_without_score_improvement(state):
+            return ToolDecision(
+                attempt=attempt,
+                tool_name="escalate_hitl",
+                reason_code="no_score_improvement",
+                confidence=1.0,
+            )
         return ToolDecision(
             attempt=attempt,
             tool_name="patch_candidate_spec",
             reason_code="dimension_endpoint_mismatch",
             target_element_id="el_freehand_dimension_001",
             confidence=1.0,
-            arguments={
-                "patch": state.get(
-                    "correction_patch_override",
-                    {"geometry.target_anchor_end": EXPECTED_TARGET_ANCHOR_END},
-                )
-            },
+            arguments={"patch": patch},
         )
 
     if not _has_revision_budget(state):
@@ -471,6 +485,43 @@ def _max_validation_error_severity(report) -> str:
 
 def _has_revision_budget(state: WorkflowState) -> bool:
     return state.get("revision_attempts", 0) < state.get("max_revision_attempts", 2)
+
+
+def _has_repeated_patch_attempt(
+    state: WorkflowState,
+    element_id: str,
+    patch: dict[str, object],
+) -> bool:
+    matching_attempts = 0
+    for attempt in reversed(state.get("review_attempts", [])):
+        if any(
+            action.type == "spec_patch"
+            and action.element_id == element_id
+            and action.patch == patch
+            for action in attempt.actions
+        ):
+            matching_attempts += 1
+            if matching_attempts >= 2:
+                return True
+            continue
+        if attempt.actions:
+            return False
+    return False
+
+
+def _has_two_attempts_without_score_improvement(state: WorkflowState) -> bool:
+    attempts_with_scores = [
+        attempt
+        for attempt in state.get("review_attempts", [])
+        if attempt.scores_before is not None and attempt.scores_after is not None
+    ]
+    if len(attempts_with_scores) < 2:
+        return False
+
+    for attempt in attempts_with_scores[-2:]:
+        if has_score_improved(attempt.scores_before, attempt.scores_after):
+            return False
+    return True
 
 
 def _analysis_client_from_state(state: WorkflowState) -> AnalysisClient:

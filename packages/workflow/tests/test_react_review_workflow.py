@@ -1,10 +1,19 @@
 from copy import deepcopy
+from types import SimpleNamespace
 
 from cleansolve_ai.mock_client import MockAnalysisClient
 from cleansolve_spec.models import Element, Evidence
 
 from cleansolve_workflow import plan_next_review_action
 from cleansolve_workflow.graph import run_mock_workflow
+from cleansolve_workflow.review_contract import (
+    MISMATCH_SCORE_FIXTURE,
+    CorrectionAction,
+    ReviewAttempt,
+    ReviewIssue,
+    ReviewScores,
+    ToolDecision,
+)
 
 
 EXPECTED_HAPPY_PATH_STATUSES = [
@@ -185,3 +194,122 @@ def test_mock_review_planner_contract_handles_missing_candidate_spec():
 
     assert decision.tool_name == "escalate_hitl"
     assert decision.reason_code == "validation_failed"
+
+
+def planner_state_with_auto_correctable_issue():
+    return {
+        "job_id": "job_planner",
+        "candidate_spec": MockAnalysisClient().extract_candidate_spec("job_planner"),
+        "validation_reports": [SimpleNamespace(passed=True)],
+        "revision_attempts": 1,
+        "max_revision_attempts": 3,
+        "latest_gate_result": SimpleNamespace(passed=False),
+        "latest_review_issues": [
+            ReviewIssue(
+                issue_id="issue_auto_001",
+                type="dimension_endpoint_mismatch",
+                severity="high",
+                element_id="el_freehand_dimension_001",
+                message="Dimension endpoint does not match the teacher solution.",
+                auto_correctable=True,
+            )
+        ],
+        "review_tool_decisions": [
+            ToolDecision(
+                attempt=1,
+                tool_name="inspect_content",
+                reason_code="initial_content_inspection",
+                confidence=1.0,
+            ),
+            ToolDecision(
+                attempt=1,
+                tool_name="inspect_layout",
+                reason_code="initial_layout_inspection",
+                confidence=1.0,
+            ),
+            ToolDecision(
+                attempt=1,
+                tool_name="inspect_style",
+                reason_code="initial_style_inspection",
+                confidence=1.0,
+            ),
+            ToolDecision(
+                attempt=1,
+                tool_name="compute_visual_diff",
+                reason_code="initial_visual_diff",
+                confidence=1.0,
+            ),
+        ],
+    }
+
+
+def test_mock_review_planner_stops_after_two_repeated_patch_attempts():
+    patch = {"geometry.target_anchor_end": [540, 850]}
+    state = planner_state_with_auto_correctable_issue()
+    state["correction_patch_override"] = patch
+    state["review_attempts"] = [
+        ReviewAttempt(
+            attempt=0,
+            tool_decisions=[],
+            issues=[],
+            actions=[
+                CorrectionAction(
+                    action_id="act_001",
+                    type="spec_patch",
+                    element_id="el_freehand_dimension_001",
+                    patch=patch,
+                )
+            ],
+        ),
+        ReviewAttempt(
+            attempt=1,
+            tool_decisions=[],
+            issues=[],
+            actions=[
+                CorrectionAction(
+                    action_id="act_002",
+                    type="spec_patch",
+                    element_id="el_freehand_dimension_001",
+                    patch=patch,
+                )
+            ],
+        ),
+    ]
+
+    decision = plan_next_review_action(state)
+
+    assert decision.tool_name == "escalate_hitl"
+    assert decision.reason_code == "repeated_element_patch"
+
+
+def test_mock_review_planner_stops_after_two_attempts_without_score_improvement():
+    state = planner_state_with_auto_correctable_issue()
+    unchanged_scores = ReviewScores(
+        content_consistency=MISMATCH_SCORE_FIXTURE.content_consistency,
+        layout_alignment=MISMATCH_SCORE_FIXTURE.layout_alignment,
+        style_similarity=MISMATCH_SCORE_FIXTURE.style_similarity,
+        visual_diff=MISMATCH_SCORE_FIXTURE.visual_diff,
+    )
+    state["review_attempts"] = [
+        ReviewAttempt(
+            attempt=0,
+            tool_decisions=[],
+            issues=[],
+            actions=[],
+            scores_before=MISMATCH_SCORE_FIXTURE,
+            scores_after=unchanged_scores,
+        ),
+        ReviewAttempt(
+            attempt=1,
+            tool_decisions=[],
+            issues=[],
+            actions=[],
+            scores_before=MISMATCH_SCORE_FIXTURE,
+            scores_after=unchanged_scores,
+        ),
+    ]
+
+    decision = plan_next_review_action(state)
+
+    assert decision.tool_name == "escalate_hitl"
+    assert decision.reason_code == "no_score_improvement"
