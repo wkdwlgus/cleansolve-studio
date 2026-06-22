@@ -1,0 +1,61 @@
+{
+  "deferred_tokens": [
+    "stroke.jitter_px",
+    "formula.baseline_jitter_px",
+    "formula.symbol_slant_deg",
+    "formula.vertical_compactness",
+    "diagram.hatching_gap_px",
+    "diagram.hatching_angle_jitter_deg"
+  ],
+  "preset_id": "default_pretty_handwriting",
+  "preset_version": "v1",
+  "renderer_mapping": {
+    "diagram_stroke_width_px": 1.9,
+    "dimension_label_font_size_px": 16,
+    "formula_font_size_px": 18,
+    "generic_stroke_width_px": 2.0,
+    "highlight_opacity": 0.35,
+    "highlight_stroke_width_px": 8,
+    "label_font_size_px": 14,
+    "text_font_size_px": 16
+  },
+  "schema_version": "renderer_calibration.v1",
+  "source": {
+    "kind": "style_profile",
+    "path": "image/style-lab/default_pretty_handwriting/v1/style_profile.generated.json",
+    "profile_status": "needs_review"
+  },
+  "status": "draft_needs_review",
+  "tokens": {
+    "diagram": {
+      "annotation_line_width_px": 1.9,
+      "hatching_angle_jitter_deg": 5.0,
+      "hatching_gap_px": 6.5,
+      "label_offset_px": 7.0
+    },
+    "formula": {
+      "baseline_jitter_px": 0.9,
+      "fraction_bar_width_px": 1.8,
+      "symbol_slant_deg": 3.0,
+      "vertical_compactness": 0.86
+    },
+    "palette": {
+      "black": "#222222",
+      "blue": "#34309A",
+      "red_orange": "#E1583E"
+    },
+    "stroke": {
+      "black_width_px": 2.0,
+      "blue_width_px": 2.1,
+      "jitter_px": 0.45,
+      "opacity": 0.94,
+      "red_width_px": 2.1
+    },
+    "text": {
+      "korean_baseline_jitter_px": 1.2,
+      "letter_spacing_px": 0.25,
+      "line_height_ratio": 1.32,
+      "size_ratio_to_formula": 0.88
+    }
+  }
+}

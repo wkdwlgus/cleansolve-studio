@@ -6,12 +6,26 @@ from typing import Any
 
 from cleansolve_spec.models import CandidateSpec, Element
 
+from cleansolve_renderer.style import (
+    RendererStyle,
+    renderer_style_for_preset,
+    resolve_font_size,
+    resolve_opacity,
+    resolve_semantic_color,
+    resolve_stroke_width,
+)
+
 
 ARROW_MARKER_ID = "cleansolve-arrowhead"
 
 
 def render_overlay_svg(spec: CandidateSpec) -> str:
-    rendered_elements = [rendered for element in spec.elements if (rendered := _render_element(element))]
+    renderer_style = renderer_style_for_preset(spec.style)
+    rendered_elements = [
+        rendered
+        for element in spec.elements
+        if (rendered := _render_element(element, renderer_style))
+    ]
     children = []
     if any(f'marker-end="url(#{ARROW_MARKER_ID})"' in rendered for rendered in rendered_elements):
         children.append(_render_arrow_defs())
@@ -30,39 +44,60 @@ def render_overlay_svg(spec: CandidateSpec) -> str:
         "viewBox": f"0 0 {width} {height}",
         "data-problem-image-id": spec.source_images.get("problem_image_id"),
         "data-teacher-solution-image-id": spec.source_images.get("teacher_solution_image_id"),
+        "data-style-preset-id": renderer_style.preset_id,
+        "data-style-preset-version": renderer_style.preset_version,
+        "data-renderer-calibration-status": renderer_style.status,
     }
     return f"<svg {_render_attrs(attrs)}>{body}</svg>"
 
 
-def _render_element(element: Element) -> str:
+def _render_element(element: Element, renderer_style: RendererStyle) -> str:
     if element.type == "formula_line":
-        return _render_text_element(element, "formula_line", "serif", 18)
+        return _render_text_element(
+            element,
+            renderer_style,
+            "formula_line",
+            "serif",
+            renderer_style.formula_font_size_px,
+        )
     if element.type == "text_note":
-        return _render_text_element(element, "text_note", "sans-serif", 16)
+        return _render_text_element(
+            element,
+            renderer_style,
+            "text_note",
+            "sans-serif",
+            renderer_style.text_font_size_px,
+        )
     if element.type == "highlight_line":
-        return _render_highlight_line(element)
+        return _render_highlight_line(element, renderer_style)
     if element.type == "highlight_curve":
-        return _render_highlight_curve(element)
+        return _render_highlight_curve(element, renderer_style)
     if element.type == "arrow":
-        return _render_arrow(element)
+        return _render_arrow(element, renderer_style)
     if element.type == "box":
-        return _render_box(element)
+        return _render_box(element, renderer_style)
     if element.type == "circle":
-        return _render_circle(element)
+        return _render_circle(element, renderer_style)
     if element.type == "point_label":
-        return _render_point_label(element)
+        return _render_point_label(element, renderer_style)
     if element.type == "segment_label":
-        return _render_segment_label(element)
+        return _render_segment_label(element, renderer_style)
     if element.type == "dimension_line":
-        return _render_dimension_line(element)
+        return _render_dimension_line(element, renderer_style)
     if element.type == "dimension_curve":
-        return _render_dimension_curve(element)
+        return _render_dimension_curve(element, renderer_style)
     if element.type == "freehand_dimension_marker":
-        return _render_freehand_dimension_marker(element)
+        return _render_freehand_dimension_marker(element, renderer_style)
     return ""
 
 
-def _render_text_element(element: Element, text_kind: str, font_family: str, default_font_size: int) -> str:
+def _render_text_element(
+    element: Element,
+    renderer_style: RendererStyle,
+    text_kind: str,
+    font_family: str,
+    default_font_size: float,
+) -> str:
     geometry = element.geometry
     anchor = geometry.get("anchor")
     text = _text_value(element)
@@ -70,21 +105,27 @@ def _render_text_element(element: Element, text_kind: str, font_family: str, def
         return ""
 
     x, y = anchor
-    color = element.color or "black"
-    attrs = _group_attrs(element)
+    color = resolve_semantic_color(element.color, renderer_style)
+    attrs = _group_attrs(element, renderer_style)
     text_attrs = {
         "x": _format_number(x),
         "y": _format_number(y),
         "fill": color,
         "font-family": font_family,
-        "font-size": _format_number(_style_number(element.style, "font_size", default_font_size, min_value=0)),
-        "data-text-kind": text_kind,
+        "font-size": _format_number(
+            resolve_font_size(element.style, default_size=default_font_size)
+        ),
     }
+    if text_kind == "text_note" and renderer_style.text_letter_spacing_px != 0:
+        text_attrs["letter-spacing"] = _format_number(
+            renderer_style.text_letter_spacing_px
+        )
+    text_attrs["data-text-kind"] = text_kind
     child = f"    <text {_render_attrs(text_attrs)}>{_xml_escape(text)}</text>"
     return f"  <g {_render_attrs(attrs)}>\n{child}\n  </g>"
 
 
-def _render_highlight_line(element: Element) -> str:
+def _render_highlight_line(element: Element, renderer_style: RendererStyle) -> str:
     geometry = element.geometry
     start = geometry.get("start")
     end = geometry.get("end")
@@ -101,15 +142,23 @@ def _render_highlight_line(element: Element) -> str:
         "x2": _format_number(x2),
         "y2": _format_number(y2),
         "stroke": color,
-        "stroke-width": _format_number(_style_number(element.style, "stroke_width", 8, min_value=0)),
+        "stroke-width": _format_number(
+            resolve_stroke_width(
+                element.style, default_width=renderer_style.highlight_stroke_width_px
+            )
+        ),
         "stroke-linecap": "round",
-        "opacity": _format_number(_style_number(element.style, "opacity", 0.35, min_value=0, include_min=True, max_value=1)),
+        "opacity": _format_number(
+            resolve_opacity(
+                element.style, default_opacity=renderer_style.highlight_opacity
+            )
+        ),
     }
     child = f"    <line {_render_attrs(line_attrs)} />"
     return f"  <g {_render_attrs(attrs)}>\n{child}\n  </g>"
 
 
-def _render_highlight_curve(element: Element) -> str:
+def _render_highlight_curve(element: Element, renderer_style: RendererStyle) -> str:
     geometry = element.geometry
     start = geometry.get("start")
     end = geometry.get("end")
@@ -132,16 +181,24 @@ def _render_highlight_curve(element: Element) -> str:
         "d": f"M {_format_point(start)} {command}",
         "fill": "none",
         "stroke": color,
-        "stroke-width": _format_number(_style_number(element.style, "stroke_width", 8, min_value=0)),
+        "stroke-width": _format_number(
+            resolve_stroke_width(
+                element.style, default_width=renderer_style.highlight_stroke_width_px
+            )
+        ),
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
-        "opacity": _format_number(_style_number(element.style, "opacity", 0.35, min_value=0, include_min=True, max_value=1)),
+        "opacity": _format_number(
+            resolve_opacity(
+                element.style, default_opacity=renderer_style.highlight_opacity
+            )
+        ),
     }
     child = f"    <path {_render_attrs(path_attrs)} />"
     return f"  <g {_render_attrs(attrs)}>\n{child}\n  </g>"
 
 
-def _render_arrow(element: Element) -> str:
+def _render_arrow(element: Element, renderer_style: RendererStyle) -> str:
     geometry = element.geometry
     start = geometry.get("start")
     end = geometry.get("end")
@@ -150,7 +207,7 @@ def _render_arrow(element: Element) -> str:
 
     x1, y1 = start
     x2, y2 = end
-    color = element.color or "black"
+    color = resolve_semantic_color(element.color, renderer_style)
     attrs = _group_attrs(element)
     line_attrs = {
         "x1": _format_number(x1),
@@ -158,7 +215,11 @@ def _render_arrow(element: Element) -> str:
         "x2": _format_number(x2),
         "y2": _format_number(y2),
         "stroke": color,
-        "stroke-width": _format_number(_style_number(element.style, "stroke_width", 2, min_value=0)),
+        "stroke-width": _format_number(
+            resolve_stroke_width(
+                element.style, default_width=renderer_style.generic_stroke_width_px
+            )
+        ),
         "stroke-linecap": "round",
         "marker-end": f"url(#{ARROW_MARKER_ID})",
     }
@@ -166,13 +227,13 @@ def _render_arrow(element: Element) -> str:
     return f"  <g {_render_attrs(attrs)}>\n{child}\n  </g>"
 
 
-def _render_box(element: Element) -> str:
+def _render_box(element: Element, renderer_style: RendererStyle) -> str:
     bbox = _as_bbox(element.geometry.get("bbox")) or _as_bbox(element.bbox)
     if bbox is None:
         return ""
 
     x, y, width, height = bbox
-    color = element.color or "black"
+    color = resolve_semantic_color(element.color, renderer_style)
     attrs = _group_attrs(element)
     rect_attrs = {
         "x": _format_number(x),
@@ -181,13 +242,17 @@ def _render_box(element: Element) -> str:
         "height": _format_number(height),
         "fill": "none",
         "stroke": color,
-        "stroke-width": _format_number(_style_number(element.style, "stroke_width", 2, min_value=0)),
+        "stroke-width": _format_number(
+            resolve_stroke_width(
+                element.style, default_width=renderer_style.generic_stroke_width_px
+            )
+        ),
     }
     child = f"    <rect {_render_attrs(rect_attrs)} />"
     return f"  <g {_render_attrs(attrs)}>\n{child}\n  </g>"
 
 
-def _render_circle(element: Element) -> str:
+def _render_circle(element: Element, renderer_style: RendererStyle) -> str:
     geometry = element.geometry
     center = geometry.get("center")
     radius = geometry.get("radius")
@@ -203,7 +268,7 @@ def _render_circle(element: Element) -> str:
         cy = y + height / 2
         resolved_radius = min(width, height) / 2
 
-    color = element.color or "black"
+    color = resolve_semantic_color(element.color, renderer_style)
     attrs = _group_attrs(element)
     circle_attrs = {
         "cx": _format_number(cx),
@@ -211,13 +276,17 @@ def _render_circle(element: Element) -> str:
         "r": _format_number(resolved_radius),
         "fill": "none",
         "stroke": color,
-        "stroke-width": _format_number(_style_number(element.style, "stroke_width", 2, min_value=0)),
+        "stroke-width": _format_number(
+            resolve_stroke_width(
+                element.style, default_width=renderer_style.generic_stroke_width_px
+            )
+        ),
     }
     child = f"    <circle {_render_attrs(circle_attrs)} />"
     return f"  <g {_render_attrs(attrs)}>\n{child}\n  </g>"
 
 
-def _render_point_label(element: Element) -> str:
+def _render_point_label(element: Element, renderer_style: RendererStyle) -> str:
     geometry = element.geometry
     point = geometry.get("point")
     text = _text_value(element)
@@ -229,10 +298,10 @@ def _render_point_label(element: Element) -> str:
     if _is_point(label_anchor):
         label_x, label_y = label_anchor
     else:
-        label_x = point_x + 8
-        label_y = point_y - 8
+        label_x = point_x + renderer_style.label_offset_px
+        label_y = point_y - renderer_style.label_offset_px
 
-    color = element.color or "black"
+    color = resolve_semantic_color(element.color, renderer_style)
     attrs = _group_attrs(element)
     point_attrs = {
         "cx": _format_number(point_x),
@@ -240,7 +309,13 @@ def _render_point_label(element: Element) -> str:
         "r": "3",
         "fill": color,
     }
-    label_attrs = _text_attrs(label_x, label_y, color, "sans-serif", _style_number(element.style, "font_size", 14, min_value=0))
+    label_attrs = _text_attrs(
+        label_x,
+        label_y,
+        color,
+        "sans-serif",
+        resolve_font_size(element.style, default_size=renderer_style.label_font_size_px),
+    )
     children = [
         f"    <circle {_render_attrs(point_attrs)} />",
         f"    <text {_render_attrs(label_attrs)}>{_xml_escape(text)}</text>",
@@ -248,7 +323,7 @@ def _render_point_label(element: Element) -> str:
     return f"  <g {_render_attrs(attrs)}>\n" + "\n".join(children) + "\n  </g>"
 
 
-def _render_segment_label(element: Element) -> str:
+def _render_segment_label(element: Element, renderer_style: RendererStyle) -> str:
     geometry = element.geometry
     start = geometry.get("start")
     end = geometry.get("end")
@@ -263,16 +338,30 @@ def _render_segment_label(element: Element) -> str:
         label_x = (start[0] + end[0]) / 2
         label_y = (start[1] + end[1]) / 2
 
-    color = element.color or "black"
+    color = resolve_semantic_color(element.color, renderer_style)
     attrs = _group_attrs(element)
-    label_attrs = _text_attrs(label_x, label_y, color, "sans-serif", _style_number(element.style, "font_size", 14, min_value=0))
+    label_attrs = _text_attrs(
+        label_x,
+        label_y,
+        color,
+        "sans-serif",
+        resolve_font_size(element.style, default_size=renderer_style.label_font_size_px),
+    )
     child = f"    <text {_render_attrs(label_attrs)}>{_xml_escape(text)}</text>"
     return f"  <g {_render_attrs(attrs)}>\n{child}\n  </g>"
 
 
-def _render_freehand_dimension_marker(element: Element) -> str:
+def _render_freehand_dimension_marker(
+    element: Element, renderer_style: RendererStyle
+) -> str:
     geometry = element.geometry
-    color = element.color or "black"
+    color = resolve_semantic_color(element.color, renderer_style)
+    stroke_width = resolve_stroke_width(
+        element.style, default_width=renderer_style.diagram_stroke_width_px
+    )
+    label_font_size = resolve_font_size(
+        element.style, default_size=renderer_style.dimension_label_font_size_px
+    )
     attrs = {
         "data-element-id": element.id,
         "data-primitive-type": element.type,
@@ -284,9 +373,9 @@ def _render_freehand_dimension_marker(element: Element) -> str:
     children = [
         rendered_stroke
         for stroke in _as_sequence(geometry.get("visible_strokes", []))
-        if (rendered_stroke := _render_visible_stroke(stroke, color))
+        if (rendered_stroke := _render_visible_stroke(stroke, color, stroke_width))
     ]
-    label = _render_label(element, geometry, color)
+    label = _render_label(element, geometry, color, label_font_size)
     if label:
         children.append(label)
 
@@ -302,7 +391,7 @@ def _render_arrow_defs() -> str:
     )
 
 
-def _render_dimension_line(element: Element) -> str:
+def _render_dimension_line(element: Element, renderer_style: RendererStyle) -> str:
     geometry = element.geometry
     start = geometry.get("visible_start") or geometry.get("target_anchor_start")
     end = geometry.get("visible_end") or geometry.get("target_anchor_end")
@@ -311,7 +400,13 @@ def _render_dimension_line(element: Element) -> str:
 
     x1, y1 = start
     x2, y2 = end
-    color = element.color or "black"
+    color = resolve_semantic_color(element.color, renderer_style)
+    stroke_width = resolve_stroke_width(
+        element.style, default_width=renderer_style.diagram_stroke_width_px
+    )
+    label_font_size = resolve_font_size(
+        element.style, default_size=renderer_style.dimension_label_font_size_px
+    )
     attrs = _dimension_group_attrs(element, geometry)
     line_attrs = {
         "x1": _format_number(x1),
@@ -319,18 +414,18 @@ def _render_dimension_line(element: Element) -> str:
         "x2": _format_number(x2),
         "y2": _format_number(y2),
         "stroke": color,
-        "stroke-width": "2",
+        "stroke-width": _format_number(stroke_width),
         "stroke-linecap": "round",
     }
     children = [f"    <line {_render_attrs(line_attrs)} />"]
-    label = _render_label(element, geometry, color)
+    label = _render_label(element, geometry, color, label_font_size)
     if label:
         children.append(label)
 
     return f"  <g {_render_attrs(attrs)}>\n" + "\n".join(children) + "\n  </g>"
 
 
-def _render_dimension_curve(element: Element) -> str:
+def _render_dimension_curve(element: Element, renderer_style: RendererStyle) -> str:
     geometry = element.geometry
     start = geometry.get("visible_start") or geometry.get("target_anchor_start")
     end = geometry.get("visible_end") or geometry.get("target_anchor_end")
@@ -342,7 +437,13 @@ def _render_dimension_curve(element: Element) -> str:
     if not _is_point(first_control):
         return ""
 
-    color = element.color or "black"
+    color = resolve_semantic_color(element.color, renderer_style)
+    stroke_width = resolve_stroke_width(
+        element.style, default_width=renderer_style.diagram_stroke_width_px
+    )
+    label_font_size = resolve_font_size(
+        element.style, default_size=renderer_style.dimension_label_font_size_px
+    )
     attrs = _dimension_group_attrs(element, geometry)
     if len(control_points) >= 2 and _is_point(control_points[1]):
         command = f"C {_format_point(first_control)} {_format_point(control_points[1])} {_format_point(end)}"
@@ -353,12 +454,12 @@ def _render_dimension_curve(element: Element) -> str:
         "d": f"M {_format_point(start)} {command}",
         "fill": "none",
         "stroke": color,
-        "stroke-width": "2",
+        "stroke-width": _format_number(stroke_width),
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
     }
     children = [f"    <path {_render_attrs(path_attrs)} />"]
-    label = _render_label(element, geometry, color)
+    label = _render_label(element, geometry, color, label_font_size)
     if label:
         children.append(label)
 
@@ -374,11 +475,19 @@ def _dimension_group_attrs(element: Element, geometry: dict[str, Any]) -> dict[s
     }
 
 
-def _group_attrs(element: Element) -> dict[str, Any]:
-    return {
+def _group_attrs(
+    element: Element, renderer_style: RendererStyle | None = None
+) -> dict[str, Any]:
+    attrs = {
         "data-element-id": element.id,
         "data-primitive-type": element.type,
     }
+    if renderer_style is not None:
+        attrs["data-style-status"] = renderer_style.status
+        attrs["data-line-height-ratio"] = _format_number(
+            renderer_style.text_line_height_ratio
+        )
+    return attrs
 
 
 def _text_attrs(x: float, y: float, color: str, font_family: str, font_size: float) -> dict[str, Any]:
@@ -391,7 +500,7 @@ def _text_attrs(x: float, y: float, color: str, font_family: str, font_size: flo
     }
 
 
-def _render_visible_stroke(stroke: Any, color: str) -> str | None:
+def _render_visible_stroke(stroke: Any, color: str, stroke_width: float) -> str | None:
     if not isinstance(stroke, dict):
         return None
 
@@ -404,14 +513,16 @@ def _render_visible_stroke(stroke: Any, color: str) -> str | None:
         "points": points,
         "fill": "none",
         "stroke": color,
-        "stroke-width": "2",
+        "stroke-width": _format_number(stroke_width),
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
     }
     return f"    <polyline {_render_attrs(attrs)} />"
 
 
-def _render_label(element: Element, geometry: dict[str, Any], color: str) -> str:
+def _render_label(
+    element: Element, geometry: dict[str, Any], color: str, font_size: float
+) -> str:
     label = geometry.get("label") or element.label
     anchor = geometry.get("label_anchor")
     if label is None or not _is_point(anchor):
@@ -423,7 +534,7 @@ def _render_label(element: Element, geometry: dict[str, Any], color: str) -> str
         "y": _format_number(y),
         "fill": color,
         "font-family": "sans-serif",
-        "font-size": "16",
+        "font-size": _format_number(font_size),
     }
     return f"    <text {_render_attrs(attrs)}>{_xml_escape(str(label))}</text>"
 
