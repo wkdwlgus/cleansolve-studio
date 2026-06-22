@@ -87,9 +87,23 @@ def load_renderer_calibration(path: Path) -> dict[str, object]:
         _required_number(renderer_mapping, key, minimum=0, include_minimum=False)
     _required_number(renderer_mapping, "highlight_opacity", minimum=0, maximum=1)
 
+    for key in ("black_width_px", "blue_width_px", "red_width_px"):
+        _required_number(stroke, key, minimum=0, include_minimum=False)
     _required_number(stroke, "opacity", minimum=0, maximum=1)
     _required_number(text, "letter_spacing_px")
     _required_number(text, "line_height_ratio", minimum=0, include_minimum=False)
+    _required_number(
+        _required_mapping(tokens, "formula"),
+        "fraction_bar_width_px",
+        minimum=0,
+        include_minimum=False,
+    )
+    _required_number(
+        diagram,
+        "annotation_line_width_px",
+        minimum=0,
+        include_minimum=False,
+    )
     _required_number(diagram, "label_offset_px", minimum=0, include_minimum=False)
 
     return calibration

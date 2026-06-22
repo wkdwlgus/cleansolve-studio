@@ -157,6 +157,29 @@ def test_invalid_calibration_schema_version_raises_style_error(tmp_path: Path) -
         load_renderer_calibration(invalid_path)
 
 
+@pytest.mark.parametrize(
+    ("token_path", "invalid_value"),
+    [
+        (("tokens", "stroke", "black_width_px"), 0),
+        (("tokens", "stroke", "blue_width_px"), -1),
+        (("tokens", "stroke", "red_width_px"), 0),
+        (("tokens", "formula", "fraction_bar_width_px"), 0),
+        (("tokens", "diagram", "annotation_line_width_px"), 0),
+    ],
+)
+def test_nonpositive_calibration_token_widths_raise_style_error(
+    tmp_path: Path, token_path: tuple[str, str, str], invalid_value: float
+) -> None:
+    calibration = json.loads(CALIBRATION_PATH.read_text(encoding="utf-8"))
+    token_group = calibration[token_path[0]][token_path[1]]
+    token_group[token_path[2]] = invalid_value
+    invalid_path = tmp_path / "renderer_calibration.v1.json"
+    invalid_path.write_text(json.dumps(calibration), encoding="utf-8")
+
+    with pytest.raises(RendererStyleError):
+        load_renderer_calibration(invalid_path)
+
+
 def test_renderer_style_for_default_preset_falls_back_for_broken_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
