@@ -15,6 +15,12 @@ class WorkflowState(TypedDict, total=False):
     inspection_issue: dict[str, Any] | None
     status_history: list[str]
     correction_patch_override: dict[str, Any]
+    review_attempts: list[Any]
+    progress_events: list[Any]
+    latest_scores: Any
+    latest_gate_result: Any
+    review_tool_decisions: list[Any]
+    review_event_sequence: int
     source_image_artifact_ids: NotRequired[dict[str, str | None]]
     source_image_paths: NotRequired[dict[str, str]]
     analysis_client_kind: str

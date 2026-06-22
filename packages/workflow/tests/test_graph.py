@@ -37,13 +37,21 @@ def test_workflow_auto_revises_before_human_review():
         "STYLE_PRESET_LOADED",
         "SPEC_EXTRACTED",
         "SPEC_VALIDATING",
+        "RENDERING",
         "RENDERED",
-        "INSPECTING",
+        "INSPECTING_CONTENT",
+        "INSPECTING_LAYOUT",
+        "INSPECTING_STYLE",
+        "COMPUTING_VISUAL_DIFF",
         "CORRECTION_PLANNING",
-        "AUTO_REVISING",
-        "SPEC_REVALIDATING",
+        "PATCHING_SPEC",
+        "RE_RENDERING",
         "RENDERED",
-        "RE_INSPECTING",
+        "SPEC_REVALIDATING",
+        "INSPECTING_CONTENT",
+        "INSPECTING_LAYOUT",
+        "INSPECTING_STYLE",
+        "COMPUTING_VISUAL_DIFF",
         "APPROVED",
     ]
     assert state["revision_attempts"] == 1
@@ -166,9 +174,9 @@ def test_workflow_revalidates_after_auto_revision_before_approval():
     assert state["validation_reports"][-1].passed is True
     assert state["inspection_issue"] is None
     assert state["status_history"][-4:] == [
-        "SPEC_REVALIDATING",
-        "RENDERED",
-        "RE_INSPECTING",
+        "INSPECTING_LAYOUT",
+        "INSPECTING_STYLE",
+        "COMPUTING_VISUAL_DIFF",
         "APPROVED",
     ]
 
