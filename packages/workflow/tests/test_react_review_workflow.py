@@ -3,6 +3,7 @@ from copy import deepcopy
 from cleansolve_ai.mock_client import MockAnalysisClient
 from cleansolve_spec.models import Element, Evidence
 
+from cleansolve_workflow import plan_next_review_action
 from cleansolve_workflow.graph import run_mock_workflow
 
 
@@ -165,7 +166,22 @@ def test_react_workflow_endpoint_correct_visible_review_routes_to_hitl():
         decision.tool_name != "patch_candidate_spec"
         for decision in state["review_tool_decisions"]
     )
+    assert state["review_tool_decisions"][-1].reason_code == "low_confidence"
     assert state["correction_plans"] == []
     assert state["latest_gate_result"].failed_reasons == [
         "visible_review_item_budget_exceeded"
     ]
+
+
+def test_mock_review_planner_contract_handles_missing_candidate_spec():
+    decision = plan_next_review_action(
+        {
+            "job_id": "job_missing_candidate",
+            "revision_attempts": 0,
+            "max_revision_attempts": 2,
+            "review_tool_decisions": [],
+        }
+    )
+
+    assert decision.tool_name == "escalate_hitl"
+    assert decision.reason_code == "validation_failed"

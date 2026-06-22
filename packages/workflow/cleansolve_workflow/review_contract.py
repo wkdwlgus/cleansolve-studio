@@ -19,6 +19,22 @@ ReviewToolName = Literal[
     "escalate_hitl",
 ]
 
+ReviewReasonCode = Literal[
+    "initial_content_inspection",
+    "initial_layout_inspection",
+    "initial_style_inspection",
+    "initial_visual_diff",
+    "dimension_endpoint_mismatch",
+    "gate_passed",
+    "revision_budget_exceeded",
+    "repeated_element_patch",
+    "no_score_improvement",
+    "low_confidence",
+    "unsupported_tool_request",
+    "requires_handwriting_asset",
+    "validation_failed",
+]
+
 ReviewPhase = Literal[
     "analysis",
     "validation",
@@ -132,7 +148,7 @@ class ToolDecision(BaseModel):
 
     attempt: int = Field(ge=0)
     tool_name: ReviewToolName
-    reason_code: str
+    reason_code: ReviewReasonCode
     target_element_id: str | None = None
     confidence: float = Field(ge=0, le=1)
     arguments: dict[str, Any] = Field(default_factory=dict)

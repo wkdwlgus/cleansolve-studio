@@ -133,7 +133,9 @@ def _route_after_inspection(state: WorkflowState) -> str:
         return "plan_correction"
     if (
         latest_decision.tool_name == "escalate_hitl"
-        and latest_decision.reason_code == "visible_review_required"
+        and latest_decision.reason_code == "low_confidence"
+        and latest_gate_result is not None
+        and latest_gate_result.failed_reasons == ["visible_review_item_budget_exceeded"]
     ):
         return "decide_human_review"
     if latest_decision.tool_name in {"request_handwriting_asset", "escalate_hitl"}:

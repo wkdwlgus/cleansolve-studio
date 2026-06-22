@@ -175,6 +175,16 @@ def test_review_tool_allowlist_rejects_unknown_tool():
         ensure_allowed_tool("read_raw_prompt")
 
 
+def test_tool_decision_rejects_unapproved_reason_code():
+    with pytest.raises(ValueError):
+        ToolDecision(
+            attempt=0,
+            tool_name="escalate_hitl",
+            reason_code="visible_review_required",
+            confidence=1.0,
+        )
+
+
 def test_score_improvement_helper_detects_improvement():
     previous = ReviewScores(
         content_consistency=0.9,

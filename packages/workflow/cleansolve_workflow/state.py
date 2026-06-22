@@ -19,6 +19,7 @@ class WorkflowState(TypedDict, total=False):
     progress_events: list[Any]
     latest_scores: Any
     latest_gate_result: Any
+    latest_review_issues: list[Any]
     review_tool_decisions: list[Any]
     review_event_sequence: int
     source_image_artifact_ids: NotRequired[dict[str, str | None]]

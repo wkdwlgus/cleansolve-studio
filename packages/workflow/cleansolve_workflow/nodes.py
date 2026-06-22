@@ -181,44 +181,8 @@ def inspect_render(state: WorkflowState) -> WorkflowState:
     )
     state["latest_scores"] = scores
     state["latest_gate_result"] = gate_result
-
-    has_auto_correctable_issue = any(issue.auto_correctable for issue in issues)
-
-    if gate_result.passed:
-        final_decision = ToolDecision(
-            attempt=attempt,
-            tool_name="mark_approved",
-            reason_code="gate_passed",
-            confidence=1.0,
-        )
-    elif has_auto_correctable_issue and attempt < state.get("max_revision_attempts", 2):
-        final_decision = ToolDecision(
-            attempt=attempt,
-            tool_name="patch_candidate_spec",
-            reason_code="dimension_endpoint_mismatch",
-            target_element_id="el_freehand_dimension_001",
-            confidence=1.0,
-            arguments={
-                "patch": state.get(
-                    "correction_patch_override",
-                    {"geometry.target_anchor_end": EXPECTED_TARGET_ANCHOR_END},
-                )
-            },
-        )
-    elif not has_auto_correctable_issue:
-        final_decision = ToolDecision(
-            attempt=attempt,
-            tool_name="escalate_hitl",
-            reason_code="visible_review_required",
-            confidence=1.0,
-        )
-    else:
-        final_decision = ToolDecision(
-            attempt=attempt,
-            tool_name="escalate_hitl",
-            reason_code="revision_budget_exceeded",
-            confidence=1.0,
-        )
+    state["latest_review_issues"] = issues
+    final_decision = plan_next_review_action(state)
 
     state["review_tool_decisions"].append(final_decision)
     tool_decisions.append(final_decision)
@@ -233,6 +197,87 @@ def inspect_render(state: WorkflowState) -> WorkflowState:
         )
     )
     return state
+
+
+def plan_next_review_action(state: WorkflowState) -> ToolDecision:
+    attempt = state.get("revision_attempts", 0)
+    if "candidate_spec" not in state:
+        return ToolDecision(
+            attempt=attempt,
+            tool_name="escalate_hitl",
+            reason_code="validation_failed",
+            confidence=1.0,
+        )
+
+    validation_reports = state.get("validation_reports", [])
+    if not validation_reports or not validation_reports[-1].passed:
+        return ToolDecision(
+            attempt=attempt,
+            tool_name="escalate_hitl",
+            reason_code="validation_failed",
+            confidence=1.0,
+        )
+
+    current_attempt_decisions = [
+        decision
+        for decision in state.get("review_tool_decisions", [])
+        if decision.attempt == attempt
+    ]
+    current_tool_names = {decision.tool_name for decision in current_attempt_decisions}
+    for tool_name, reason_code in (
+        ("inspect_content", "initial_content_inspection"),
+        ("inspect_layout", "initial_layout_inspection"),
+        ("inspect_style", "initial_style_inspection"),
+        ("compute_visual_diff", "initial_visual_diff"),
+    ):
+        if tool_name not in current_tool_names:
+            return ToolDecision(
+                attempt=attempt,
+                tool_name=tool_name,
+                reason_code=reason_code,
+                confidence=1.0,
+            )
+
+    gate_result = state.get("latest_gate_result")
+    if gate_result is not None and gate_result.passed:
+        return ToolDecision(
+            attempt=attempt,
+            tool_name="mark_approved",
+            reason_code="gate_passed",
+            confidence=1.0,
+        )
+
+    issues = state.get("latest_review_issues", [])
+    has_auto_correctable_issue = any(issue.auto_correctable for issue in issues)
+    if has_auto_correctable_issue and _has_revision_budget(state):
+        return ToolDecision(
+            attempt=attempt,
+            tool_name="patch_candidate_spec",
+            reason_code="dimension_endpoint_mismatch",
+            target_element_id="el_freehand_dimension_001",
+            confidence=1.0,
+            arguments={
+                "patch": state.get(
+                    "correction_patch_override",
+                    {"geometry.target_anchor_end": EXPECTED_TARGET_ANCHOR_END},
+                )
+            },
+        )
+
+    if not _has_revision_budget(state):
+        return ToolDecision(
+            attempt=attempt,
+            tool_name="escalate_hitl",
+            reason_code="revision_budget_exceeded",
+            confidence=1.0,
+        )
+
+    return ToolDecision(
+        attempt=attempt,
+        tool_name="escalate_hitl",
+        reason_code="low_confidence",
+        confidence=1.0,
+    )
 
 
 def plan_correction(state: WorkflowState) -> WorkflowState:
@@ -422,6 +467,10 @@ def _max_validation_error_severity(report) -> str:
         if severity_rank[issue.severity] > severity_rank[max_severity]:
             max_severity = issue.severity
     return max_severity
+
+
+def _has_revision_budget(state: WorkflowState) -> bool:
+    return state.get("revision_attempts", 0) < state.get("max_revision_attempts", 2)
 
 
 def _analysis_client_from_state(state: WorkflowState) -> AnalysisClient:

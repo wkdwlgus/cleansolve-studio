@@ -1,4 +1,5 @@
 from .graph import build_graph, run_mock_workflow
+from .nodes import plan_next_review_action
 from .review_contract import (
     APPROVED_SCORE_FIXTURE,
     CONTRACT_INVALID_SCORE_FIXTURE,
@@ -8,6 +9,7 @@ from .review_contract import (
     CorrectionAction,
     GateResult,
     ProgressEvent,
+    ReviewReasonCode,
     ReviewAttempt,
     ReviewIssue,
     ReviewScores,
@@ -29,6 +31,7 @@ __all__ = [
     "ProgressEvent",
     "ReviewAttempt",
     "ReviewIssue",
+    "ReviewReasonCode",
     "ReviewScores",
     "ReviewToolRejected",
     "ToolDecision",
@@ -37,5 +40,6 @@ __all__ = [
     "ensure_allowed_tool",
     "evaluate_approval_gate",
     "has_score_improved",
+    "plan_next_review_action",
     "run_mock_workflow",
 ]
