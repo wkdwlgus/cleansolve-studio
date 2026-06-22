@@ -604,6 +604,78 @@ def test_renderer_renders_dimension_line_with_target_anchors():
     assert ">12<" in svg
 
 
+def test_renderer_uses_calibrated_dimension_stroke_width():
+    spec = CandidateSpec(
+        job_id="job_render",
+        version=1,
+        source_images={"problem_image_id": "p", "teacher_solution_image_id": "s"},
+        style=StylePreset(source="system_builtin", preset_id="default_pretty_handwriting", preset_version="v1"),
+        page=Page(width=400, height=300),
+        elements=[
+            Element(
+                id="el_dimension_line",
+                type="dimension_line",
+                color="red_orange",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[40, 50, 140, 30]),
+                bbox=[40, 50, 140, 30],
+                geometry={
+                    "target_anchor_start": [40, 60],
+                    "target_anchor_end": [180, 60],
+                    "visible_start": [45, 70],
+                    "visible_end": [175, 70],
+                    "label_anchor": [100, 55],
+                    "label": "5",
+                },
+            ),
+            Element(
+                id="el_dimension_curve",
+                type="dimension_curve",
+                color="blue",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[40, 100, 140, 60]),
+                bbox=[40, 100, 140, 60],
+                geometry={
+                    "target_anchor_start": [40, 140],
+                    "target_anchor_end": [180, 140],
+                    "visible_start": [45, 145],
+                    "visible_end": [175, 145],
+                    "control_points": [[100, 90]],
+                    "label_anchor": [102, 120],
+                    "label": "arc",
+                },
+            ),
+            Element(
+                id="el_freehand",
+                type="freehand_dimension_marker",
+                color="black",
+                confidence=0.9,
+                evidence=Evidence(source="teacher_solution_image", bbox=[40, 180, 140, 60]),
+                bbox=[40, 180, 140, 60],
+                geometry={
+                    "target_anchor_start": [40, 220],
+                    "target_anchor_end": [180, 220],
+                    "visible_strokes": [
+                        {"stroke_id": "stroke_a", "points": [[45, 215], [90, 205], [175, 216]]}
+                    ],
+                    "label_anchor": [100, 195],
+                    "label": "free",
+                },
+            ),
+        ],
+    )
+
+    svg = render_overlay_svg(spec)
+
+    assert_xml_parseable(svg)
+    assert '<line x1="45" y1="70" x2="175" y2="70" stroke="#E1583E" stroke-width="1.9"' in svg
+    assert '<path d="M 45,145 Q 100,90 175,145" fill="none" stroke="#34309A" stroke-width="1.9"' in svg
+    assert '<polyline data-stroke-id="stroke_a" points="45,215 90,205 175,216" fill="none" stroke="#222222" stroke-width="1.9"' in svg
+    assert '<text x="100" y="55" fill="#E1583E" font-family="sans-serif" font-size="16">5</text>' in svg
+    assert '<text x="102" y="120" fill="#34309A" font-family="sans-serif" font-size="16">arc</text>' in svg
+    assert '<text x="100" y="195" fill="#222222" font-family="sans-serif" font-size="16">free</text>' in svg
+
+
 def test_renderer_renders_dimension_curve_with_control_points():
     spec = CandidateSpec(
         job_id="job_render",
@@ -795,8 +867,8 @@ def test_renderer_uses_element_color_for_label_fill_and_visible_stroke():
     svg = render_overlay_svg(spec)
 
     assert_xml_parseable(svg)
-    assert '<polyline data-stroke-id="s1" points="25,75 45,60" fill="none" stroke="blue"' in svg
-    assert '<text x="65" y="50" fill="blue"' in svg
+    assert '<polyline data-stroke-id="s1" points="25,75 45,60" fill="none" stroke="#34309A"' in svg
+    assert '<text x="65" y="50" fill="#34309A"' in svg
 
 
 def test_renderer_escapes_svg_text_and_attribute_values():
