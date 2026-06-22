@@ -117,6 +117,28 @@ def run_job(job_id: str) -> dict[str, object]:
             reason=reason,
         )
         raise analysis_adapter_failed_error(settings.analysis_client, reason) from exc
+    review_correction_payload = {
+        "job_id": job_id,
+        "review_attempts": [
+            attempt.model_dump(mode="json") for attempt in state.get("review_attempts", [])
+        ],
+        "tool_decisions": [
+            decision.model_dump(mode="json")
+            for decision in state.get("review_tool_decisions", [])
+        ],
+        "latest_gate_result": (
+            state["latest_gate_result"].model_dump(mode="json")
+            if state.get("latest_gate_result") is not None
+            else None
+        ),
+        "revision_attempts": state["revision_attempts"],
+    }
+    progress_events_payload = {
+        "job_id": job_id,
+        "events": [
+            event.model_dump(mode="json") for event in state.get("progress_events", [])
+        ],
+    }
     updated_manifest = store.save_analysis_outputs(
         job_id=job_id,
         status_value=state["status"],
@@ -129,6 +151,8 @@ def run_job(job_id: str) -> dict[str, object]:
             "revision_attempts": state["revision_attempts"],
             "correction_plans": state.get("correction_plans", []),
         },
+        review_correction_payload=review_correction_payload,
+        progress_events_payload=progress_events_payload,
         source_image_artifact_ids=source_image_artifact_ids,
     )
     return job_response(updated_manifest)
@@ -341,6 +365,16 @@ def get_validation_report(job_id: str) -> dict[str, object]:
 @router.get("/{job_id}/correction-plan")
 def get_correction_plan(job_id: str) -> dict[str, object]:
     return _store().read_latest_analysis_payload(job_id, "correction_plan")
+
+
+@router.get("/{job_id}/review-correction")
+def get_review_correction(job_id: str) -> dict[str, object]:
+    return _store().read_latest_analysis_payload(job_id, "review_correction")
+
+
+@router.get("/{job_id}/progress-events")
+def get_progress_events(job_id: str) -> dict[str, object]:
+    return _store().read_latest_analysis_payload(job_id, "progress_events")
 
 
 @router.get("/{job_id}/review-items")

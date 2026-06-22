@@ -137,11 +137,15 @@ def test_run_with_openai_sdk_failure_returns_502_without_analysis_artifacts(monk
         "candidate_spec": [],
         "validation_report": [],
         "correction_plan": [],
+        "review_correction": [],
+        "progress_events": [],
     }
     assert job_response_payload["latest_analysis_artifact_ids"] == {
         "candidate_spec": None,
         "validation_report": None,
         "correction_plan": None,
+        "review_correction": None,
+        "progress_events": None,
     }
     assert "sk-" not in str(response.json())
     assert "private" not in str(response.json())
@@ -170,6 +174,46 @@ def test_review_items_endpoint_hides_internal_needs_review_items():
 
     assert response.status_code == 200
     assert response.json()["items"] == []
+
+
+def test_run_job_persists_review_correction_and_progress_events():
+    client = TestClient(app)
+    job = client.post("/jobs").json()
+    job_id = job["job_id"]
+    upload_required_images(client, job_id)
+
+    response = client.post(f"/jobs/{job_id}/run")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["latest_analysis_artifact_ids"]["review_correction"].startswith("review_")
+    assert payload["latest_analysis_artifact_ids"]["progress_events"].startswith("events_")
+
+    review_response = client.get(f"/jobs/{job_id}/review-correction")
+    assert review_response.status_code == 200
+    review_payload = review_response.json()
+    assert review_payload["job_id"] == job_id
+    assert review_payload["revision_attempts"] == 1
+    assert review_payload["tool_decisions"][-1]["tool_name"] == "mark_approved"
+    assert review_payload["latest_gate_result"]["passed"] is True
+
+    events_response = client.get(f"/jobs/{job_id}/progress-events")
+    assert events_response.status_code == 200
+    events_payload = events_response.json()
+    assert events_payload["job_id"] == job_id
+    assert len(events_payload["events"]) >= 1
+    assert events_payload["events"][0]["message"] == "작업을 시작했습니다."
+    assert "source_image_paths" not in events_payload["events"][0]
+
+
+def test_progress_events_endpoint_returns_404_before_run():
+    client = TestClient(app)
+    job = client.post("/jobs").json()
+
+    response = client.get(f"/jobs/{job['job_id']}/progress-events")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "ANALYSIS_ARTIFACT_NOT_FOUND"
 
 
 def test_get_unknown_job_returns_structured_404():
@@ -396,11 +440,15 @@ def test_old_manifest_json_defaults_analysis_artifact_fields(tmp_path):
         "candidate_spec": [],
         "validation_report": [],
         "correction_plan": [],
+        "review_correction": [],
+        "progress_events": [],
     }
     assert manifest.latest_analysis_artifact_ids == {
         "candidate_spec": None,
         "validation_report": None,
         "correction_plan": None,
+        "review_correction": None,
+        "progress_events": None,
     }
     assert manifest.render_artifacts == []
     assert manifest.latest_render_artifact_id is None
@@ -447,14 +495,19 @@ def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
     assert updated.latest_analysis_artifact_ids["candidate_spec"].startswith("spec_")
     assert updated.latest_analysis_artifact_ids["validation_report"].startswith("report_")
     assert updated.latest_analysis_artifact_ids["correction_plan"].startswith("correction_")
+    assert updated.latest_analysis_artifact_ids["review_correction"] is None
+    assert updated.latest_analysis_artifact_ids["progress_events"] is None
 
-    for artifact_type, artifacts in updated.analysis_artifacts.items():
+    for artifact_type in ("candidate_spec", "validation_report", "correction_plan"):
+        artifacts = updated.analysis_artifacts[artifact_type]
         assert len(artifacts) == 1
         artifact = artifacts[0]
         artifact_path = tmp_path / "jobs" / manifest.job_id / artifact.relative_path
         assert artifact_path.exists()
         assert artifact.size_bytes == len(artifact_path.read_bytes())
         assert artifact.source_image_artifact_ids == source_ids
+    assert updated.analysis_artifacts["review_correction"] == []
+    assert updated.analysis_artifacts["progress_events"] == []
 
 
 def test_store_saves_spec_patch_outputs_without_replacing_correction_plan(tmp_path):
@@ -496,6 +549,8 @@ def test_store_saves_spec_patch_outputs_without_replacing_correction_plan(tmp_pa
     assert len(updated.analysis_artifacts["candidate_spec"]) == 2
     assert len(updated.analysis_artifacts["validation_report"]) == 2
     assert len(updated.analysis_artifacts["correction_plan"]) == 1
+    assert len(updated.analysis_artifacts["review_correction"]) == 0
+    assert len(updated.analysis_artifacts["progress_events"]) == 0
     assert store.read_latest_analysis_payload(manifest.job_id, "candidate_spec")["version"] == 2
 
 
@@ -804,6 +859,8 @@ def test_analysis_artifact_routes_return_structured_404_before_run():
         ("candidate-spec", "candidate_spec"),
         ("validation-report", "validation_report"),
         ("correction-plan", "correction_plan"),
+        ("review-correction", "review_correction"),
+        ("progress-events", "progress_events"),
     ]:
         response = client.get(f"/jobs/{job_id}/{path}")
 
@@ -829,11 +886,15 @@ def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads():
         "candidate_spec",
         "validation_report",
         "correction_plan",
+        "review_correction",
+        "progress_events",
     }
     assert all(run_payload["latest_analysis_artifact_ids"].values())
     assert len(run_payload["analysis_artifacts"]["candidate_spec"]) == 1
     assert len(run_payload["analysis_artifacts"]["validation_report"]) == 1
     assert len(run_payload["analysis_artifacts"]["correction_plan"]) == 1
+    assert len(run_payload["analysis_artifacts"]["review_correction"]) == 1
+    assert len(run_payload["analysis_artifacts"]["progress_events"]) == 1
 
     artifacts_response = client.get(f"/jobs/{job_id}/artifacts")
     candidate_response = client.get(f"/jobs/{job_id}/candidate-spec")

@@ -15,7 +15,13 @@ from pydantic import BaseModel, Field
 ImageRole = Literal["problem", "teacher_solution"]
 ImageMimeType = Literal["image/png", "image/jpeg"]
 ImageExtension = Literal["png", "jpg"]
-AnalysisArtifactType = Literal["candidate_spec", "validation_report", "correction_plan"]
+AnalysisArtifactType = Literal[
+    "candidate_spec",
+    "validation_report",
+    "correction_plan",
+    "review_correction",
+    "progress_events",
+]
 RenderArtifactType = Literal["overlay_svg"]
 ExportFormat = Literal["png"]
 ExportMimeType = Literal["image/png"]
@@ -29,16 +35,22 @@ ANALYSIS_ARTIFACT_TYPES: tuple[AnalysisArtifactType, ...] = (
     "candidate_spec",
     "validation_report",
     "correction_plan",
+    "review_correction",
+    "progress_events",
 )
 ANALYSIS_ARTIFACT_PREFIXES: dict[AnalysisArtifactType, str] = {
     "candidate_spec": "spec",
     "validation_report": "report",
     "correction_plan": "correction",
+    "review_correction": "review",
+    "progress_events": "events",
 }
 ANALYSIS_ARTIFACT_DIRECTORIES: dict[AnalysisArtifactType, str] = {
     "candidate_spec": "specs",
     "validation_report": "reports",
     "correction_plan": "corrections",
+    "review_correction": "reviews",
+    "progress_events": "events",
 }
 
 ERROR_MESSAGES = {
@@ -422,6 +434,8 @@ class LocalArtifactStore:
         candidate_spec_payload: dict[str, Any],
         validation_report_payload: dict[str, Any],
         correction_plan_payload: dict[str, Any],
+        review_correction_payload: dict[str, Any] | None = None,
+        progress_events_payload: dict[str, Any] | None = None,
         source_image_artifact_ids: dict[ImageRole, str],
     ) -> JobManifest:
         _validate_job_id(job_id)
@@ -430,6 +444,10 @@ class LocalArtifactStore:
             "validation_report": validation_report_payload,
             "correction_plan": correction_plan_payload,
         }
+        if review_correction_payload is not None:
+            payloads["review_correction"] = review_correction_payload
+        if progress_events_payload is not None:
+            payloads["progress_events"] = progress_events_payload
 
         with self._job_lock(job_id):
             manifest = self.get_job(job_id)
