@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 ReviewToolName = Literal[
@@ -68,6 +69,14 @@ NextAction = Literal[
 ErrorSeverity = Literal["none", "low", "medium", "high"]
 
 
+def _ensure_json_serializable(value: dict[str, Any]) -> dict[str, Any]:
+    try:
+        json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("payload dict must be JSON serializable") from exc
+    return value
+
+
 class ReviewScores(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -111,6 +120,11 @@ class ReviewIssue(BaseModel):
     auto_correctable: bool
     evidence: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("evidence")
+    @classmethod
+    def _evidence_must_be_json_serializable(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _ensure_json_serializable(value)
+
 
 class ToolDecision(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -122,6 +136,11 @@ class ToolDecision(BaseModel):
     confidence: float = Field(ge=0, le=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("arguments")
+    @classmethod
+    def _arguments_must_be_json_serializable(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _ensure_json_serializable(value)
+
 
 class CorrectionAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -131,6 +150,11 @@ class CorrectionAction(BaseModel):
     element_id: str | None = None
     patch: dict[str, Any] = Field(default_factory=dict)
     asset_request: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("patch", "asset_request")
+    @classmethod
+    def _payload_dict_must_be_json_serializable(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _ensure_json_serializable(value)
 
 
 class ReviewAttempt(BaseModel):
@@ -233,7 +257,7 @@ def append_progress_event(
         next_action=next_action,
         created_at=datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     )
-    state["progress_events"].append(event)
+    state.setdefault("progress_events", []).append(event)
     state["review_event_sequence"] = sequence + 1
     return event
 
