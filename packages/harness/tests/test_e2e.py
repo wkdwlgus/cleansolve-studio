@@ -32,6 +32,9 @@ def test_api_upload_to_export_e2e_passes_with_manual_fixture(monkeypatch, tmp_pa
     assert result.render_artifact_id.startswith("render_")
     assert result.export_artifact_id.startswith("export_")
     assert result.export_size_bytes > 0
+    progress_payload = client.get(f"/jobs/{result.job_id}/progress-events").json()
+    assert len(progress_payload["events"]) >= 1
+    assert progress_payload["events"][0]["message"] == "작업을 시작했습니다."
 
 
 def test_api_upload_to_export_e2e_does_not_require_openai_key(monkeypatch, tmp_path):

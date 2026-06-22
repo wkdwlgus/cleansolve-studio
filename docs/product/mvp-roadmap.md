@@ -24,7 +24,7 @@
 | Validation | Partial | style, bbox, evidence, dimension anchor, review budget 중심 검증은 있음 |
 | Deterministic renderer | Done | M3 MVP primitive SVG overlay와 source image metadata 보존 지원 |
 | Mock AI adapter | Done | fixture 기반 candidate spec 생성 경로가 있음 |
-| Workflow orchestrator | Partial | LangGraph self-revision prototype이 있으나 실제 image ingestion/artifact 상태와는 아직 느슨함 |
+| Workflow orchestrator | Partial | LangGraph self-revision prototype에 ReAct review/correction contract, eval gate result, progress event artifact가 추가됐으나 실제 GPT-5.5 planner와 SSE stream은 아직 없음 |
 | FastAPI job API | Partial | job 생성, 이미지 upload/artifact 저장, run, spec patch, render, export 기반 endpoint가 있음 |
 | Web editor shell | Done | 이미지 업로드, workflow 실행, candidate spec preview, review panel 표시 흐름이 있음 |
 | HITL policy | Partial | `requires_human_review=true` 필터와 review budget은 구현됨 |
@@ -350,14 +350,16 @@
 
 M8 기준으로 현재 상태는 `Partial MVP`다. 다음 작업은 새 milestone 번호를 미리 고정하지 않고, [MVP Release Checklist](./mvp-release-checklist.md)의 남은 gap 중 하나를 선택해 별도 설계부터 시작한다.
 
+`default_pretty_handwriting v1` renderer calibration contract는 완료됐고, 다음 UX 병목은 긴 review/correction loop 진행 상황을 사용자에게 보여주는 것이다.
+
 우선순위 후보:
 
-1. Handwriting Style Lab과 `default_pretty_handwriting v1` renderer calibration
-2. GPT-5.5 기반 ReAct review/correction workflow와 eval gate
-3. job progress SSE stream과 web progress UI
+1. job progress SSE stream과 web progress UI
+2. 실제 GPT-5.5 기반 ReAct planner 연결
+3. 실제 eval model 연결
 4. 실제 OpenAI adapter 결과에 대한 dataset evaluation
 5. production-grade PNG/PDF export와 compositing 품질 개선
 6. Playwright visual regression과 browser full export flow
 7. 치수선 endpoint/source alignment의 이미지 기반 검증
 
-현재 추천 순서는 1번이다. 이유는 한글, 수식, 도형 주석이 같은 손글씨 계열처럼 보여야 이후 OpenAI 분석, correction workflow, export 품질 평가가 의미를 갖기 때문이다. 이 작업은 [손글씨 스타일 레퍼런스 세트](./handwriting-style-reference-set.md)를 입력으로 삼고, [AI Review & Correction Workflow](../architecture/ai-review-correction-workflow.md)의 Style Lab 단계부터 시작한다.
+현재 추천 순서는 1번이다. 이유는 mock progress event artifact는 저장되지만, 긴 AI 분석/보정 loop 동안 사용자가 진행 상황을 볼 수 있는 SSE stream과 web progress UI가 아직 없기 때문이다. 이 작업은 [AI Review & Correction Workflow](../architecture/ai-review-correction-workflow.md)의 review/correction loop를 사용자에게 노출하는 UX 계약부터 시작한다.
