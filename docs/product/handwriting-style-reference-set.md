@@ -98,3 +98,27 @@ image/style-lab/default_pretty_handwriting/v1/style_profile.generated.json
 ```
 
 이 파일은 다음 renderer calibration milestone의 검토 입력이다. 이번 단계는 renderer preset을 갱신하지 않으며, `assets/style-presets/default_pretty_handwriting/preset.json`에 token 값을 자동 적용하지 않는다.
+
+## Renderer Calibration Contract
+
+`renderer_calibration.v1.json`은 `default_pretty_handwriting v1`을 deterministic SVG renderer가 읽을 수 있게 만든 repository-committed draft contract다.
+
+경로:
+
+```text
+assets/style-presets/default_pretty_handwriting/renderer_calibration.v1.json
+```
+
+현재 상태는 `draft_needs_review`다. 이 값은 `image/style-lab/default_pretty_handwriting/v1/style_profile.generated.json`에서 추출한 style profile token을 기반으로 하지만, ignored local artifact를 runtime renderer가 직접 읽지는 않는다.
+
+이번 calibration은 색상, 기본 획 두께, 텍스트/수식 크기, label offset처럼 deterministic SVG에 안전하게 반영 가능한 값만 적용한다.
+
+이번 단계에서 완료하지 않는 항목:
+
+- 손글씨 font 생성 또는 학습
+- `gpt-image-2` asset 생성
+- style similarity gate
+- visual diff score gate
+- Web UI 연결
+- LangGraph runtime 연결
+- `draft_needs_review`에서 `approved`로 상태 변경
