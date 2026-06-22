@@ -182,6 +182,8 @@ def inspect_render(state: WorkflowState) -> WorkflowState:
     state["latest_scores"] = scores
     state["latest_gate_result"] = gate_result
 
+    has_auto_correctable_issue = any(issue.auto_correctable for issue in issues)
+
     if gate_result.passed:
         final_decision = ToolDecision(
             attempt=attempt,
@@ -189,7 +191,7 @@ def inspect_render(state: WorkflowState) -> WorkflowState:
             reason_code="gate_passed",
             confidence=1.0,
         )
-    elif attempt < state.get("max_revision_attempts", 2):
+    elif has_auto_correctable_issue and attempt < state.get("max_revision_attempts", 2):
         final_decision = ToolDecision(
             attempt=attempt,
             tool_name="patch_candidate_spec",
@@ -202,6 +204,13 @@ def inspect_render(state: WorkflowState) -> WorkflowState:
                     {"geometry.target_anchor_end": EXPECTED_TARGET_ANCHOR_END},
                 )
             },
+        )
+    elif not has_auto_correctable_issue:
+        final_decision = ToolDecision(
+            attempt=attempt,
+            tool_name="escalate_hitl",
+            reason_code="visible_review_required",
+            confidence=1.0,
         )
     else:
         final_decision = ToolDecision(
@@ -291,7 +300,15 @@ def apply_correction(state: WorkflowState) -> WorkflowState:
 
 def decide_human_review(state: WorkflowState) -> WorkflowState:
     state["review_items"] = visible_review_items(state["candidate_spec"])
-    if state.get("latest_gate_result") is not None and state["latest_gate_result"].passed:
+    latest_gate_result = state.get("latest_gate_result")
+    visible_review_only_failure = (
+        latest_gate_result is not None
+        and latest_gate_result.failed_reasons == ["visible_review_item_budget_exceeded"]
+    )
+    if (
+        latest_gate_result is not None
+        and (latest_gate_result.passed or visible_review_only_failure)
+    ):
         _set_status(
             state,
             "NEEDS_REVIEW" if state["review_items"] else "APPROVED",

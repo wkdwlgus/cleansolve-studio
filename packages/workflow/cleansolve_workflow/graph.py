@@ -131,6 +131,11 @@ def _route_after_inspection(state: WorkflowState) -> str:
         return "require_revision"
     if latest_decision.tool_name == "patch_candidate_spec":
         return "plan_correction"
+    if (
+        latest_decision.tool_name == "escalate_hitl"
+        and latest_decision.reason_code == "visible_review_required"
+    ):
+        return "decide_human_review"
     if latest_decision.tool_name in {"request_handwriting_asset", "escalate_hitl"}:
         return "require_revision"
     return "require_revision"

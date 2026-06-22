@@ -140,3 +140,32 @@ def test_react_workflow_auto_correction_changes_candidate_spec_geometry():
     element = state["candidate_spec"].elements[0]
     assert element.geometry["target_anchor_end"] != original_endpoint
     assert element.geometry["target_anchor_end"] == [540, 850]
+
+
+def test_react_workflow_endpoint_correct_visible_review_routes_to_hitl():
+    candidate_spec = MockAnalysisClient().extract_candidate_spec("job_react_visible_hitl")
+    candidate_spec.elements[0].geometry["target_anchor_end"] = [540, 850]
+    candidate_spec.elements[0].requires_human_review = True
+    candidate_spec.elements[0].review_reason = "Endpoint needs operator review."
+
+    state = run_mock_workflow(
+        job_id="job_react_visible_hitl",
+        candidate_spec_override=candidate_spec,
+    )
+
+    assert state["status"] == "NEEDS_REVIEW"
+    assert state["review_items"] == [
+        {
+            "element_id": "el_freehand_dimension_001",
+            "type": "freehand_dimension_marker",
+            "review_reason": "Endpoint needs operator review.",
+        }
+    ]
+    assert all(
+        decision.tool_name != "patch_candidate_spec"
+        for decision in state["review_tool_decisions"]
+    )
+    assert state["correction_plans"] == []
+    assert state["latest_gate_result"].failed_reasons == [
+        "visible_review_item_budget_exceeded"
+    ]
