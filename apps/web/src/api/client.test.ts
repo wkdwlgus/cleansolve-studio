@@ -50,6 +50,15 @@ const progressEventPayload = {
   created_at: '2026-06-23T00:00:00Z'
 };
 
+const secondProgressEventPayload = {
+  ...progressEventPayload,
+  event_id: 'evt_0001',
+  sequence: 1,
+  phase: 'render',
+  status: 'APPROVED',
+  message: '렌더링을 완료했습니다.'
+};
+
 describe('editor API client', () => {
   it('uploads both images, runs workflow, and loads candidate spec plus review items', async () => {
     const problemFile = new File(['problem'], 'problem.png', { type: 'image/png' });
@@ -341,6 +350,54 @@ describe('editor API client', () => {
     expect(source.closeCount).toBe(1);
   });
 
+  it('closes stream and reports callback errors without classifying them as parse failures', () => {
+    const source = new FakeEventSource();
+    const errors: string[] = [];
+
+    streamProgressEvents('job_test', {
+      eventSourceFactory: () => source,
+      onProgress: () => {
+        throw new Error('callback failed');
+      },
+      onError: (error) => errors.push(error.message)
+    });
+
+    source.emit('progress', JSON.stringify(progressEventPayload));
+
+    expect(errors).toEqual(['callback failed']);
+    expect(source.closeCount).toBe(1);
+  });
+
+  it('closes stream before running a throwing completion callback', () => {
+    const source = new FakeEventSource();
+
+    streamProgressEvents('job_test', {
+      eventSourceFactory: () => source,
+      onComplete: () => {
+        throw new Error('complete failed');
+      }
+    });
+
+    expect(() => source.emit('complete', JSON.stringify({ job_id: 'job_test', event_count: 0 }))).toThrow(
+      'complete failed'
+    );
+    expect(source.closeCount).toBe(1);
+  });
+
+  it('closes stream before running a throwing stream error callback', () => {
+    const source = new FakeEventSource();
+
+    streamProgressEvents('job_test', {
+      eventSourceFactory: () => source,
+      onError: () => {
+        throw new Error('error callback failed');
+      }
+    });
+
+    expect(() => source.fail()).toThrow('error callback failed');
+    expect(source.closeCount).toBe(1);
+  });
+
   it('replays progress events into an array', async () => {
     const source = new FakeEventSource();
     const seen: string[] = [];
@@ -354,6 +411,21 @@ describe('editor API client', () => {
 
     await expect(promise).resolves.toEqual([progressEventPayload]);
     expect(seen).toEqual(['작업을 시작했습니다.']);
+    expect(source.closeCount).toBe(1);
+  });
+
+  it('rejects replay when a progress callback fails', async () => {
+    const source = new FakeEventSource();
+    const promise = replayProgressEvents('job_test', {
+      eventSourceFactory: () => source,
+      onProgress: () => {
+        throw new Error('callback failed');
+      }
+    });
+
+    source.emit('progress', JSON.stringify(progressEventPayload));
+
+    await expect(promise).rejects.toThrow('callback failed');
     expect(source.closeCount).toBe(1);
   });
 
@@ -371,6 +443,15 @@ describe('editor API client', () => {
     };
 
     await expect(getProgressEvents('job_test', '', fetcher)).resolves.toEqual([progressEventPayload]);
+  });
+
+  it('returns an empty progress list for malformed top-level progress payloads', async () => {
+    const fetcher = async (url: string): Promise<Response> => {
+      expect(url).toBe('/jobs/job_test/progress-events');
+      return Response.json(null);
+    };
+
+    await expect(getProgressEvents('job_test', '', fetcher)).resolves.toEqual([]);
   });
 
   it('throws Korean messages for patch and render failures', async () => {
@@ -486,6 +567,111 @@ describe('editor API client', () => {
 
     expect(result.progressEvents).toEqual([progressEventPayload]);
     expect(calls).toContain('GET /jobs/job_test/progress-events');
+  });
+
+  it('deduplicates fallback progress after a partially delivered SSE stream fails', async () => {
+    const problemFile = new File(['problem'], 'problem.png', { type: 'image/png' });
+    const teacherFile = new File(['teacher'], 'teacher.png', { type: 'image/png' });
+    let resolveSource: (source: FakeEventSource) => void = () => {};
+    const sourcePromise = new Promise<FakeEventSource>((resolve) => {
+      resolveSource = resolve;
+    });
+    const seen: string[] = [];
+    const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url === '/jobs' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'CREATED' }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/problem' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/teacher-solution' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/run' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'APPROVED', revision_attempts: 1 });
+      }
+      if (url === '/jobs/job_test/progress-events') {
+        return Response.json({ job_id: 'job_test', events: [progressEventPayload, secondProgressEventPayload] });
+      }
+      if (url === '/jobs/job_test/candidate-spec') {
+        return Response.json({ job_id: 'job_test', version: 1, page: { width: 1, height: 1 }, elements: [] });
+      }
+      if (url === '/jobs/job_test/review-items') {
+        return Response.json({ items: [] });
+      }
+      return Response.json({ detail: 'not found' }, { status: 404 });
+    };
+
+    const resultPromise = runUploadToReviewWorkflow(
+      { problemFile, teacherSolutionFile: teacherFile },
+      {
+        fetcher,
+        eventSourceFactory: () => {
+          const createdSource = new FakeEventSource();
+          resolveSource(createdSource);
+          return createdSource;
+        },
+        onProgress: (event) => seen.push(event.message)
+      }
+    );
+
+    const source = await sourcePromise;
+    source.emit('progress', JSON.stringify(progressEventPayload));
+    source.fail();
+
+    const result = await resultPromise;
+
+    expect(seen).toEqual(['작업을 시작했습니다.', '렌더링을 완료했습니다.']);
+    expect(result.progressEvents).toEqual([progressEventPayload, secondProgressEventPayload]);
+  });
+
+  it('rejects fallback progress callback failures instead of swallowing them', async () => {
+    const problemFile = new File(['problem'], 'problem.png', { type: 'image/png' });
+    const teacherFile = new File(['teacher'], 'teacher.png', { type: 'image/png' });
+    const calls: string[] = [];
+    const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      if (url === '/jobs' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'CREATED' }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/problem' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/teacher-solution' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/run' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'APPROVED', revision_attempts: 1 });
+      }
+      if (url === '/jobs/job_test/progress-events') {
+        return Response.json({ job_id: 'job_test', events: [progressEventPayload] });
+      }
+      if (url === '/jobs/job_test/candidate-spec') {
+        return Response.json({ job_id: 'job_test', version: 1, page: { width: 1, height: 1 }, elements: [] });
+      }
+      if (url === '/jobs/job_test/review-items') {
+        return Response.json({ items: [] });
+      }
+      return Response.json({ detail: 'not found' }, { status: 404 });
+    };
+
+    await expect(
+      runUploadToReviewWorkflow(
+        { problemFile, teacherSolutionFile: teacherFile },
+        {
+          fetcher,
+          eventSourceFactory: () => {
+            throw new Error('EventSource unavailable');
+          },
+          onProgress: () => {
+            throw new Error('callback failed');
+          }
+        }
+      )
+    ).rejects.toThrow('callback failed');
+
+    expect(calls).toContain('GET /jobs/job_test/progress-events');
+    expect(calls).not.toContain('GET /jobs/job_test/candidate-spec');
   });
 
   it('swallows progress collection failures and continues review loading', async () => {

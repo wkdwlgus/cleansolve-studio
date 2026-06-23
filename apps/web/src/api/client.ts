@@ -37,6 +37,20 @@ export interface EventSourceLike {
   onerror: ((event: Event) => void) | null;
 }
 
+class ProgressStreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProgressStreamError';
+  }
+}
+
+class ProgressConsumerError extends Error {
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : '진행 상황 처리 중 오류가 발생했습니다.');
+    this.name = 'ProgressConsumerError';
+  }
+}
+
 export interface EditorJob {
   jobId: string;
   status: string;
@@ -186,26 +200,34 @@ export function streamProgressEvents(
   };
 
   source.addEventListener('progress', (event) => {
+    let payload: ProgressEventPayload;
     try {
-      const payload = JSON.parse(event.data);
+      payload = JSON.parse(event.data);
       if (!isProgressEventPayload(payload)) {
         throw new Error('invalid progress event payload');
       }
-      onProgress?.(payload);
     } catch {
-      onError?.(new Error('진행 상황을 해석하지 못했습니다.'));
       close();
+      onError?.(new ProgressStreamError('진행 상황을 해석하지 못했습니다.'));
+      return;
+    }
+
+    try {
+      onProgress?.(payload);
+    } catch (error) {
+      close();
+      onError?.(error instanceof Error ? error : new ProgressConsumerError(error));
     }
   });
 
   source.addEventListener('complete', () => {
-    onComplete?.();
     close();
+    onComplete?.();
   });
 
   source.onerror = () => {
-    onError?.(new Error('진행 상황 연결이 끊겼습니다.'));
     close();
+    onError?.(new ProgressStreamError('진행 상황 연결이 끊겼습니다.'));
   };
 
   return close;
@@ -225,16 +247,20 @@ export async function replayProgressEvents(
 ): Promise<ProgressEventPayload[]> {
   return new Promise((resolve, reject) => {
     const events: ProgressEventPayload[] = [];
-    streamProgressEvents(jobId, {
-      baseUrl,
-      eventSourceFactory,
-      onProgress: (event) => {
-        events.push(event);
-        onProgress?.(event);
-      },
-      onComplete: () => resolve(events),
-      onError: reject
-    });
+    try {
+      streamProgressEvents(jobId, {
+        baseUrl,
+        eventSourceFactory,
+        onProgress: (event) => {
+          events.push(event);
+          onProgress?.(event);
+        },
+        onComplete: () => resolve(events),
+        onError: reject
+      });
+    } catch (error) {
+      reject(error instanceof ProgressConsumerError ? error : new ProgressStreamError('진행 상황 연결이 끊겼습니다.'));
+    }
   });
 }
 
@@ -244,7 +270,10 @@ export async function getProgressEvents(
   fetcher: typeof fetch = fetch
 ): Promise<ProgressEventPayload[]> {
   const response = await fetcher(`${baseUrl}/jobs/${jobId}/progress-events`);
-  const payload = await readJson<ProgressEventsResponse>(response, '진행 상황을 불러오지 못했습니다.');
+  const payload = await readJson<unknown>(response, '진행 상황을 불러오지 못했습니다.');
+  if (!isRecord(payload)) {
+    return [];
+  }
   if (!Array.isArray(payload.events)) {
     return [];
   }
@@ -358,19 +387,41 @@ async function collectProgressEvents(
     onProgress?: (event: ProgressEventPayload) => void;
   }
 ): Promise<ProgressEventPayload[]> {
+  const deliveredEvents: ProgressEventPayload[] = [];
+  const deliveredEventKeys = new Set<string>();
+  const forwardProgress = (event: ProgressEventPayload) => {
+    deliveredEvents.push(event);
+    deliveredEventKeys.add(progressEventKey(event));
+    onProgress?.(event);
+  };
+
   try {
-    return await replayProgressEvents(jobId, { baseUrl, eventSourceFactory, onProgress });
-  } catch {
+    return await replayProgressEvents(jobId, { baseUrl, eventSourceFactory, onProgress: forwardProgress });
+  } catch (error) {
+    if (!(error instanceof ProgressStreamError)) {
+      throw error;
+    }
+    let events: ProgressEventPayload[];
     try {
-      const events = await getProgressEvents(jobId, baseUrl, fetcher);
-      for (const event of events) {
-        onProgress?.(event);
-      }
-      return events;
+      events = await getProgressEvents(jobId, baseUrl, fetcher);
     } catch {
       return [];
     }
+    for (const event of events) {
+      const eventKey = progressEventKey(event);
+      if (deliveredEventKeys.has(eventKey)) {
+        continue;
+      }
+      deliveredEvents.push(event);
+      deliveredEventKeys.add(eventKey);
+      onProgress?.(event);
+    }
+    return deliveredEvents;
   }
+}
+
+function progressEventKey(event: ProgressEventPayload): string {
+  return `${event.job_id}:${event.event_id}:${event.sequence}`;
 }
 
 function normalizeReviewItem(item: ApiReviewItem): ReviewItem {
