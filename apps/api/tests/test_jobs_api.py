@@ -770,6 +770,10 @@ def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
     }
     manifest.latest_image_artifact_ids = source_ids
     store.save_manifest(manifest)
+    store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids=source_ids,
+    )
 
     updated = store.save_analysis_outputs(
         job_id=manifest.job_id,
@@ -821,6 +825,10 @@ def test_read_latest_analysis_payload_rejects_path_escape_from_corrupt_manifest(
     ids = source_ids()
     manifest.latest_image_artifact_ids = ids
     store.save_manifest(manifest)
+    store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids=ids,
+    )
 
     updated = store.save_analysis_outputs(
         job_id=manifest.job_id,
@@ -871,6 +879,10 @@ def test_read_latest_analysis_payload_rejects_symlink_escape_from_corrupt_manife
     ids = source_ids()
     manifest.latest_image_artifact_ids = ids
     store.save_manifest(manifest)
+    store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids=ids,
+    )
 
     updated = store.save_analysis_outputs(
         job_id=manifest.job_id,
@@ -924,6 +936,10 @@ def test_store_saves_spec_patch_outputs_without_replacing_correction_plan(tmp_pa
     }
     manifest.latest_image_artifact_ids = source_ids
     store.save_manifest(manifest)
+    store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids=source_ids,
+    )
     initial = store.save_analysis_outputs(
         job_id=manifest.job_id,
         status_value="APPROVED",
@@ -1260,6 +1276,13 @@ def test_store_rejects_analysis_outputs_when_latest_inputs_changed(tmp_path):
         "teacher_solution": "img_teacher_new",
     }
     store.save_manifest(manifest)
+    store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids={
+            "problem": "img_problem_new",
+            "teacher_solution": "img_teacher_new",
+        },
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         store.save_analysis_outputs(
