@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
-import { patchCandidateSpec, renderJobPreview, runUploadToReviewWorkflow } from '../api/client';
+import { patchCandidateSpec, renderJobPreview, runUploadToReviewWorkflow, type ProgressEventPayload } from '../api/client';
 import { EditorCanvas } from '../editor/EditorCanvas';
 import { ReviewPanel } from '../editor/ReviewPanel';
 import { createTargetAnchorDraft, draftToSpecPatchRequest, type TargetAnchorDraft } from '../editor/editDraft';
@@ -58,7 +58,9 @@ export function App() {
       const result = await runUploadToReviewWorkflow(
         { problemFile, teacherSolutionFile },
         {
-          onPhase: (phase) => setWorkflow((current) => nextWorkflowState(current, { type: phase }))
+          onPhase: (phase) => setWorkflow((current) => nextWorkflowState(current, { type: phase })),
+          onProgress: (progressEvent: ProgressEventPayload) =>
+            setWorkflow((current) => nextWorkflowState(current, { type: 'progress-server', event: progressEvent }))
         }
       );
       setWorkflow((current) => nextWorkflowState(current, { type: 'ready', job: result }));
@@ -133,6 +135,8 @@ export function App() {
     }
   };
 
+  const progressItems = workflow.progressItems;
+
   return (
     <main className="app-shell">
       <section className="workspace" aria-label="편집 작업 영역">
@@ -185,6 +189,31 @@ export function App() {
             </p>
           ) : null}
         </form>
+        <section className="progress-panel" aria-label="진행 상황" role="status" aria-live="polite">
+          <div className="panel-header">
+            <h2>진행 상황</h2>
+            <span>{progressItems.length}</span>
+          </div>
+          {progressItems.length === 0 ? (
+            <p className="empty-state">아직 시작된 진행 단계가 없습니다.</p>
+          ) : (
+            <ol className="progress-list">
+              {progressItems.map((item) => (
+                <li
+                  key={item.id}
+                  className={`progress-item${item.active ? ' is-active' : ''}`}
+                  aria-current={item.active ? 'step' : undefined}
+                >
+                  <strong>{item.message}</strong>
+                  <small className="progress-meta">
+                    {item.active ? '진행 중' : '완료'}
+                    {item.source === 'server' ? ` · 시도 ${item.attempt}/${item.maxAttempts}` : ''}
+                  </small>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
         <EditorCanvas candidateSpec={job?.candidateSpec ?? null} markerReviewItem={markerReviewItem} />
         <section className="edit-panel" aria-label="선택 항목 수정">
           <div className="panel-header">
