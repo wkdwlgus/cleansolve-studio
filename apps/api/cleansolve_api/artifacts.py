@@ -638,7 +638,11 @@ class LocalArtifactStore:
         if artifact is None:
             raise render_artifact_not_found_error()
 
-        artifact_path = self._job_root(job_id) / artifact.relative_path
+        artifact_path = self._artifact_path_inside_job(
+            job_id,
+            artifact.relative_path,
+            render_artifact_not_found_error(),
+        )
         if not artifact_path.exists():
             raise render_artifact_not_found_error()
         return {
@@ -664,7 +668,11 @@ class LocalArtifactStore:
         if artifact is None:
             raise render_artifact_not_found_error()
 
-        artifact_path = self._job_root(job_id) / artifact.relative_path
+        artifact_path = self._artifact_path_inside_job(
+            job_id,
+            artifact.relative_path,
+            render_artifact_not_found_error(),
+        )
         if not artifact_path.exists():
             raise render_artifact_not_found_error()
         return manifest, artifact, artifact_path.read_text(encoding="utf-8")
@@ -794,7 +802,11 @@ class LocalArtifactStore:
         if artifact is None:
             raise analysis_artifact_not_found_error(artifact_type)
 
-        artifact_path = self._job_root(job_id) / artifact.relative_path
+        artifact_path = self._artifact_path_inside_job(
+            job_id,
+            artifact.relative_path,
+            analysis_artifact_not_found_error(artifact_type),
+        )
         if not artifact_path.exists():
             raise analysis_artifact_not_found_error(artifact_type)
         return json.loads(artifact_path.read_text(encoding="utf-8"))
@@ -1042,18 +1054,30 @@ class LocalArtifactStore:
             raise export_artifact_not_found_error()
         return artifact
 
-    def _export_artifact_path(self, job_id: str, artifact: ExportArtifact) -> Path:
-        relative_path = Path(artifact.relative_path)
+    def _artifact_path_inside_job(
+        self,
+        job_id: str,
+        relative_path_value: str,
+        not_found_error: HTTPException,
+    ) -> Path:
+        relative_path = Path(relative_path_value)
         if relative_path.is_absolute():
-            raise export_artifact_not_found_error()
+            raise not_found_error
 
         job_root = self._job_root(job_id).resolve()
         artifact_path = (job_root / relative_path).resolve()
         try:
             artifact_path.relative_to(job_root)
         except ValueError:
-            raise export_artifact_not_found_error() from None
+            raise not_found_error from None
         return artifact_path
+
+    def _export_artifact_path(self, job_id: str, artifact: ExportArtifact) -> Path:
+        return self._artifact_path_inside_job(
+            job_id,
+            artifact.relative_path,
+            export_artifact_not_found_error(),
+        )
 
     def _job_lock(self, job_id: str) -> Lock:
         key = (str(self.storage_root), job_id)

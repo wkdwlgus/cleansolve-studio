@@ -37,6 +37,13 @@ def assert_error(response, code: str):
     assert isinstance(payload["detail"]["fields"], dict)
 
 
+def source_ids():
+    return {
+        "problem": "img_problem_123",
+        "teacher_solution": "img_teacher_456",
+    }
+
+
 def test_create_job_initializes_manifest_backed_response():
     client = TestClient(app)
 
@@ -590,6 +597,106 @@ def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
     assert updated.analysis_artifacts["progress_events"] == []
 
 
+def test_read_latest_analysis_payload_rejects_path_escape_from_corrupt_manifest(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    store.save_manifest(manifest)
+
+    updated = store.save_analysis_outputs(
+        job_id=manifest.job_id,
+        status_value="APPROVED",
+        revision_attempts=1,
+        review_items=[],
+        candidate_spec_payload={"job_id": manifest.job_id, "version": 1},
+        validation_report_payload={"report_id": "report_1", "passed": True, "issues": []},
+        correction_plan_payload={
+            "job_id": manifest.job_id,
+            "revision_attempts": 1,
+            "correction_plans": [],
+        },
+        source_image_artifact_ids=ids,
+    )
+
+    artifact = updated.analysis_artifacts["candidate_spec"][0]
+    artifact.relative_path = "../escape.json"
+    store.save_manifest(updated)
+    (tmp_path / "jobs" / "escape.json").write_text(
+        '{"escaped": true}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.read_latest_analysis_payload(manifest.job_id, "candidate_spec")
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail["code"] == "ANALYSIS_ARTIFACT_NOT_FOUND"
+    assert "escape.json" not in str(exc_info.value.detail)
+
+    absolute_path = tmp_path / "escape-absolute.json"
+    absolute_path.write_text('{"escaped": true}', encoding="utf-8")
+    artifact.relative_path = str(absolute_path)
+    store.save_manifest(updated)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.read_latest_analysis_payload(manifest.job_id, "candidate_spec")
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail["code"] == "ANALYSIS_ARTIFACT_NOT_FOUND"
+    assert str(absolute_path) not in str(exc_info.value.detail)
+
+
+def test_read_latest_analysis_payload_rejects_symlink_escape_from_corrupt_manifest(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    store.save_manifest(manifest)
+
+    updated = store.save_analysis_outputs(
+        job_id=manifest.job_id,
+        status_value="APPROVED",
+        revision_attempts=1,
+        review_items=[],
+        candidate_spec_payload={"job_id": manifest.job_id, "version": 1},
+        validation_report_payload={"report_id": "report_1", "passed": True, "issues": []},
+        correction_plan_payload={
+            "job_id": manifest.job_id,
+            "revision_attempts": 1,
+            "correction_plans": [],
+        },
+        source_image_artifact_ids=ids,
+    )
+
+    outside_path = tmp_path / "outside.json"
+    outside_path.write_text('{"escaped": true}', encoding="utf-8")
+    link_path = (
+        tmp_path
+        / "jobs"
+        / manifest.job_id
+        / "artifacts"
+        / "specs"
+        / "spec_escape.json"
+    )
+    link_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link_path.symlink_to(outside_path)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is not available: {exc}")
+
+    artifact = updated.analysis_artifacts["candidate_spec"][0]
+    artifact.relative_path = "artifacts/specs/spec_escape.json"
+    store.save_manifest(updated)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.read_latest_analysis_payload(manifest.job_id, "candidate_spec")
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail["code"] == "ANALYSIS_ARTIFACT_NOT_FOUND"
+    assert "outside.json" not in str(exc_info.value.detail)
+
+
 def test_store_saves_spec_patch_outputs_without_replacing_correction_plan(tmp_path):
     store = LocalArtifactStore(tmp_path / "jobs")
     manifest = store.create_job()
@@ -715,6 +822,38 @@ def test_store_saves_and_reads_rendered_preview_artifact(tmp_path):
         "artifact": artifact.model_dump(mode="json"),
         "svg": svg,
     }
+
+
+def test_render_artifact_reads_reject_path_escape_from_corrupt_manifest(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    _, artifact = store.save_render_artifact(
+        job_id=manifest.job_id,
+        svg='<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+        candidate_spec_artifact_id="spec_123",
+        source_image_artifact_ids=ids,
+    )
+
+    current_manifest = store.get_job(manifest.job_id)
+    current_manifest.render_artifacts[0].relative_path = "../escape.svg"
+    store.save_manifest(current_manifest)
+    (tmp_path / "jobs" / "escape.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg"><text>escaped</text></svg>',
+        encoding="utf-8",
+    )
+
+    for call in (
+        lambda: store.rendered_preview_response(manifest.job_id),
+        lambda: store.latest_render_artifact(manifest.job_id),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            call()
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail["code"] == "RENDER_ARTIFACT_NOT_FOUND"
+        assert "escape.svg" not in str(exc_info.value.detail)
+
+    assert artifact.artifact_id == current_manifest.latest_render_artifact_id
 
 
 def test_store_rejects_render_artifact_when_candidate_spec_is_not_latest(tmp_path):
