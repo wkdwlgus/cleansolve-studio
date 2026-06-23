@@ -24,8 +24,8 @@
 | Validation | Partial | style, bbox, evidence, dimension anchor, review budget 중심 검증은 있음 |
 | Deterministic renderer | Done | M3 MVP primitive SVG overlay와 source image metadata 보존 지원 |
 | Mock AI adapter | Done | fixture 기반 candidate spec 생성 경로가 있음 |
-| Workflow orchestrator | Partial | LangGraph self-revision prototype에 ReAct review/correction contract, eval gate result, progress event artifact가 추가됨. SSE replay UI를 추가한 뒤 background job + live SSE로 확장해야 함 |
-| FastAPI job API | Partial | job 생성, 이미지 upload/artifact 저장, run, spec patch, render, export 기반 endpoint가 있음 |
+| Workflow orchestrator | Partial | LangGraph self-revision prototype에 ReAct review/correction contract, eval gate result, progress event artifact가 추가됨. M9 SSE replay UI는 완료됐고, M10에서 background job + live SSE로 확장해야 함 |
+| FastAPI job API | Partial | job 생성, 이미지 upload/artifact 저장, synchronous run, spec patch, render, export, SSE replay endpoint가 있음 |
 | Web editor shell | Done | 이미지 업로드, workflow 실행, candidate spec preview, review panel 표시 흐름이 있음 |
 | HITL policy | Partial | `requires_human_review=true` 필터와 review budget은 구현됨 |
 | Spec patch 저장 | Done | 제한된 server-side spec patch API와 revision history 저장이 구현됨 |
@@ -298,9 +298,11 @@
 
 ### M9. Job Progress SSE Replay UI
 
-상태: In Progress
+상태: Done
 
 상세 설계: [M9 Job Progress SSE Replay UI 상세 설계](../superpowers/specs/2026-06-23-job-progress-sse-ui-design.md)
+
+구현 결과: 저장된 `progress_events` artifact를 `text/event-stream`으로 replay하는 API, web progress stream consumer, workflow progress state, 접근 가능한 진행 상황 panel, Playwright SSE replay smoke test가 구현됨.
 
 목표:
 
@@ -349,6 +351,109 @@
 - browser refresh 후에도 누락 없이 진행 timeline을 복원한다.
 - worker failure 또는 analysis adapter failure가 stream과 job 상태에 일관되게 반영된다.
 
+### M11. Real Planner & Eval Gate Integration
+
+상태: Planned
+
+목표:
+
+- mock 중심 self-revision loop를 실제 모델 기반 planner/evaluator loop로 확장한다.
+- `validate_spec_ai`, `inspect_render_ai`, `plan_correction_ai`에 실제 AI adapter 계약을 연결한다.
+- deterministic renderer는 그대로 유지하고, 모델은 spec 생성/검수/수정 계획에만 사용한다.
+
+주요 산출물:
+
+- planner/evaluator adapter interface
+- GPT-5.5 기반 correction planning adapter
+- render inspection/eval adapter
+- score threshold 기반 approval gate
+- safe failure/retry/HITL contract
+- opt-in real model smoke test
+
+완료 기준:
+
+- mock adapter와 real adapter가 같은 planner/eval 계약을 사용한다.
+- API key가 없어도 기본 테스트와 mock E2E가 통과한다.
+- 실제 모델 호출은 opt-in smoke로만 실행된다.
+- raw model output, prompt, local path, API key가 job response/progress event/UI에 노출되지 않는다.
+- 낮은 confidence 또는 반복 실패는 HITL로 전환된다.
+
+### M12. Dataset Evaluation & Source Alignment
+
+상태: Planned
+
+목표:
+
+- 단일 fixture가 아니라 여러 실제 문제/손풀이 샘플에서 candidate spec, renderer, correction 품질을 평가한다.
+- 여러 문제/여러 페이지 입력에 대한 crop/matching 결과를 평가 dataset으로 연결한다.
+- source-to-spec, render-to-source alignment metric을 MVP release 판단에 포함한다.
+
+주요 산출물:
+
+- local ignored dataset manifest
+- sample/job matching manifest
+- batch evaluation CLI 또는 pytest harness
+- source-to-spec alignment metric
+- render-to-source visual/layout metric
+- dataset summary report
+
+완료 기준:
+
+- 사용자가 제공한 실제 샘플 subset을 git에 커밋하지 않고 평가할 수 있다.
+- batch run 결과가 pass/partial/fail과 주요 실패 원인을 남긴다.
+- dimension endpoint/source alignment, formula/text layout, visible review item count가 dataset 단위로 측정된다.
+- MVP release checklist가 단일 fixture가 아닌 dataset metric을 근거로 업데이트된다.
+
+### M13. Export Quality & Visual Regression
+
+상태: Planned
+
+목표:
+
+- 최종 산출물 품질을 MVP release 기준으로 검증한다.
+- PNG export foundation을 production-grade compositing 방향으로 강화하고 PDF export 여부를 결정/구현한다.
+- browser full export flow와 visual regression을 자동화한다.
+
+주요 산출물:
+
+- full browser upload-to-export E2E
+- Playwright visual snapshot 또는 pixel-level regression harness
+- production-grade PNG compositing check
+- PDF export prototype 또는 명시적 MVP 제외 결정
+- export artifact QA report
+
+완료 기준:
+
+- 사용자가 브라우저에서 upload, review, patch, render, export까지 한 흐름으로 실행할 수 있다.
+- export 결과가 최신 source image, candidate spec, render artifact와 일관된다.
+- visual regression이 핵심 fixture의 preview/export 차이를 감지한다.
+- PDF를 MVP에 포함할지 제외할지 문서와 테스트 기준으로 확정한다.
+
+### M14. MVP Release Candidate Hardening
+
+상태: Planned
+
+목표:
+
+- M0~M13 산출물을 묶어 MVP release candidate 여부를 판정한다.
+- release checklist의 `Partial` 항목을 MVP 허용/차단 기준으로 재분류한다.
+- 사용자/운영 문서를 실제 실행 가능한 형태로 정리한다.
+
+주요 산출물:
+
+- updated MVP release checklist
+- release candidate verification script
+- env/setup/runbook 문서
+- known limitations 문서
+- PR/issue backlog for post-MVP production hardening
+
+완료 기준:
+
+- release checklist가 `MVP RC Pass`, `MVP RC Blocker`, `Post-MVP`로 재분류된다.
+- fresh clone 기준 setup, env, test, local run 절차가 문서대로 동작한다.
+- API/web/harness/e2e 검증 명령이 하나의 release checklist에 정리된다.
+- MVP에 포함하지 않는 기능이 명시적으로 post-MVP backlog로 이동된다.
+
 ## SoT MVP 성공 기준 추적
 
 | # | SoT 성공 기준 | 현재 상태 | 연결 milestone |
@@ -357,24 +462,38 @@
 | 2 | 기본 내장 손글씨 스타일 프리셋 로드 | Done | M0 |
 | 3 | candidate spec 생성 또는 mock spec 처리 | Done | M2 |
 | 4 | candidate spec 기반 overlay preview | Done | M3 |
-| 5 | 하단 풀이 수식/텍스트 재배치 | Partial | M3 |
+| 5 | 하단 풀이 수식/텍스트 재배치 | Partial | M3, M12, M13 |
 | 6 | 도형 위 highlight/arrow/box/label 표시 | Done | M3 |
 | 7 | dimension_line/dimension_curve endpoint와 anchor 표현 | Done | M3 |
 | 8 | needs_review 내부 검증 관리 | Partial | M2, M8 |
 | 9 | requires_human_review만 사용자 노출 | Done | M4 |
-| 10 | element type별 허용된 수정 방식 | Partial | M4, M5 |
+| 10 | element type별 허용된 수정 방식 | Partial | M4, M5, M11 |
 | 11 | 수정사항 spec patch 저장 | Done | M5 |
 | 12 | 수정 후 deterministic re-render | Done | M5 |
-| 13 | 최종 이미지 export | Partial | M6, M8 |
+| 13 | 최종 이미지 export | Partial | M6, M8, M13 |
 | 14 | 최소 fixture harness 통과 | Done | M8 |
 | 15 | freehand-style 치수선 표현 | Done | M0, M3 |
 | 16 | target anchor와 visible stroke 분리 저장 | Done | M0, M3 |
 | 17 | 치수선 label을 group 일부로 관리 | Done | M0, M3 |
-| 18 | 치수선 endpoint와 span 검증 | Partial | M2, M8 |
+| 18 | 치수선 endpoint와 span 검증 | Partial | M2, M8, M12 |
 | 19 | HITL이 예외 경로로 동작 | Done | M2, M4 |
 | 20 | 사용자 검수 노출률과 review item 개수 측정 | Done | M8 |
-| 21 | 생성/렌더링 결과 자동 검수 | Partial | M2, M8 |
-| 22 | 오류 발견 시 correction plan 생성 | Partial | M2, M8 |
+| 21 | 생성/렌더링 결과 자동 검수 | Partial | M2, M8, M11, M12 |
+| 22 | 오류 발견 시 correction plan 생성 | Partial | M2, M8, M11 |
+
+## MVP까지 남은 확정 마일스톤
+
+현재 고정된 MVP release candidate 경로는 **M10~M14, 총 5개 마일스톤**이다.
+
+| 순서 | 마일스톤 | 목적 | MVP 판단에 주는 의미 |
+| --- | --- | --- | --- |
+| 1 | M10 Background Job & Live SSE | 실행 중 progress를 실시간으로 보여준다. | 긴 AI loop가 사용자에게 멈춘 것처럼 보이지 않게 한다. |
+| 2 | M11 Real Planner & Eval Gate Integration | 실제 planner/evaluator 모델을 workflow 계약에 연결한다. | mock이 아닌 실제 모델 기반 자동 검수/수정 판단을 시작한다. |
+| 3 | M12 Dataset Evaluation & Source Alignment | 실제 샘플 dataset으로 품질을 측정한다. | 단일 fixture가 아니라 여러 실제 문제에서 실패율을 본다. |
+| 4 | M13 Export Quality & Visual Regression | 최종 산출물과 browser export flow를 검증한다. | 사용자가 받을 결과물이 MVP 품질인지 확인한다. |
+| 5 | M14 MVP Release Candidate Hardening | checklist, 문서, 검증 명령을 release 기준으로 묶는다. | MVP RC 여부를 명확히 판정한다. |
+
+M14 이후 작업은 MVP 자체가 아니라 production hardening으로 분리한다. 예: multi-user auth, cloud storage, external queue, billing, admin dashboard, 대규모 monitoring.
 
 ## 권장 PR 순서
 
@@ -388,6 +507,10 @@
 8. `feat/mvp-e2e-harness`
 9. `feat/job-progress-sse-ui`
 10. `feat/background-live-sse`
+11. `feat/real-planner-eval-gate`
+12. `feat/dataset-evaluation-source-alignment`
+13. `feat/export-quality-visual-regression`
+14. `feat/mvp-release-candidate-hardening`
 
 각 PR은 Superpowers 흐름을 따른다.
 
@@ -403,19 +526,16 @@
 
 ## 다음 추천 작업
 
-M8 기준으로 현재 상태는 `Partial MVP`다. 다음 두 작업은 UX 병목과 실행 구조 병목을 분리하기 위해 M9, M10으로 고정한다. 그 이후 작업은 [MVP Release Checklist](./mvp-release-checklist.md)의 남은 gap 중 하나를 선택해 별도 설계부터 시작한다.
+M9 기준으로 현재 상태는 `Partial MVP`다. 다음 작업은 M10으로 고정한다. M10 이후에는 M11~M14 순서대로 진행해야 MVP release candidate 판정까지 갈 수 있다.
 
-`default_pretty_handwriting v1` renderer calibration contract는 완료됐고, 다음 UX 병목은 긴 review/correction loop 진행 상황을 사용자에게 보여주는 것이다.
+`default_pretty_handwriting v1` renderer calibration contract와 M9 SSE replay UI는 완료됐다. 다음 병목은 synchronous run 구조 때문에 사용자가 실제 workflow 실행 중 live progress를 볼 수 없다는 점이다.
 
 우선순위 후보:
 
-1. job progress SSE replay stream과 web progress UI
-2. background job + live SSE
-3. 실제 GPT-5.5 기반 ReAct planner 연결
-4. 실제 eval model 연결
-5. 실제 OpenAI adapter 결과에 대한 dataset evaluation
-6. production-grade PNG/PDF export와 compositing 품질 개선
-7. Playwright visual regression과 browser full export flow
-8. 치수선 endpoint/source alignment의 이미지 기반 검증
+1. M10 background job + live SSE
+2. M11 실제 GPT-5.5 기반 ReAct planner와 eval gate 연결
+3. M12 실제 OpenAI adapter 결과에 대한 dataset evaluation과 source alignment
+4. M13 production-grade PNG/PDF export와 visual regression
+5. M14 MVP release candidate hardening
 
-현재 추천 순서는 1번을 먼저 구현하고, 바로 다음 작업으로 2번을 별도 설계/구현하는 것이다. 이유는 mock progress event artifact는 저장되지만, 긴 AI 분석/보정 loop 동안 사용자가 진행 상황을 볼 수 있는 UI 계약이 아직 없고, 실시간 live SSE는 run 비동기화와 durable progress flush 계약이 필요해 별도 milestone으로 분리해야 하기 때문이다.
+현재 추천 순서는 M10을 먼저 구현하는 것이다. 이유는 M9에서 progress UI와 replay 계약은 생겼지만, run이 아직 synchronous라 실제 긴 분석 중에는 stream이 live로 동작하지 않기 때문이다.
