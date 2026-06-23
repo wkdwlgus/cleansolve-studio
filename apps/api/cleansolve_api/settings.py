@@ -55,6 +55,18 @@ class Settings(BaseModel):
         default_factory=lambda: _env_value("OPENAI_ANALYSIS_TIMEOUT_SECONDS", "60"),
         ge=1,
     )
+    background_max_workers: int = Field(
+        default_factory=lambda: _env_value("CLEANSOLVE_BACKGROUND_MAX_WORKERS", "1"),
+        ge=1,
+    )
+    progress_poll_interval_ms: int = Field(
+        default_factory=lambda: _env_value("CLEANSOLVE_PROGRESS_POLL_INTERVAL_MS", "250"),
+        ge=1,
+    )
+    progress_heartbeat_seconds: int = Field(
+        default_factory=lambda: _env_value("CLEANSOLVE_PROGRESS_HEARTBEAT_SECONDS", "15"),
+        ge=1,
+    )
     storage_root: Path = Field(
         default_factory=lambda: Path(_env_value("CLEANSOLVE_STORAGE_ROOT", "var/jobs"))
     )

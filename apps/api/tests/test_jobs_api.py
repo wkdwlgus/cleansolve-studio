@@ -498,6 +498,9 @@ def test_settings_default_to_mock_analysis_client(monkeypatch):
     assert settings.openai_model_image == "gpt-image-2"
     assert settings.openai_analysis_image_detail == "auto"
     assert settings.openai_analysis_timeout_seconds == 60
+    assert settings.background_max_workers == 1
+    assert settings.progress_poll_interval_ms == 250
+    assert settings.progress_heartbeat_seconds == 15
 
 
 def test_settings_reject_invalid_analysis_client(monkeypatch):
@@ -534,6 +537,113 @@ def test_manifest_store_rejects_invalid_workflow_status(tmp_path):
         )
 
     assert store.get_job(manifest.job_id).status == "CREATED"
+
+
+def test_store_start_analysis_run_marks_job_running(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    store.save_manifest(manifest)
+
+    updated = store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids=ids,
+    )
+
+    assert updated.status == "RUNNING"
+    assert updated.latest_analysis_artifact_ids["candidate_spec"] is None
+    assert updated.latest_analysis_artifact_ids["progress_events"] is None
+
+
+def test_store_start_analysis_run_rejects_terminal_job(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    manifest.status = "APPROVED"
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.start_analysis_run(
+            manifest.job_id,
+            source_image_artifact_ids=ids,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "JOB_RUN_NOT_RESTARTABLE"
+    assert exc_info.value.detail["fields"] == {
+        "job_id": manifest.job_id,
+        "status": "APPROVED",
+    }
+
+
+def test_store_start_analysis_run_rejects_running_job(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    manifest.status = "RUNNING"
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.start_analysis_run(
+            manifest.job_id,
+            source_image_artifact_ids=ids,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "JOB_ALREADY_RUNNING"
+    assert exc_info.value.detail["fields"] == {"job_id": manifest.job_id}
+
+
+def test_store_save_failed_background_run_persists_only_safe_progress_events(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    manifest.status = "RUNNING"
+    store.save_manifest(manifest)
+    failed_event = {
+        "event_id": "evt_0000",
+        "job_id": manifest.job_id,
+        "sequence": 0,
+        "phase": "failed",
+        "status": "FAILED",
+        "message": "작업이 실패했습니다.",
+        "attempt": 0,
+        "max_attempts": 2,
+        "scores": None,
+        "next_action": "fail",
+        "created_at": "2026-06-23T00:00:00Z",
+    }
+
+    updated = store.save_failed_background_run(
+        manifest.job_id,
+        reason="configuration_error",
+        review_item={
+            "type": "analysis_adapter_failed",
+            "client": "openai",
+            "retryable": True,
+            "review_reason": None,
+            "safe_reason": "configuration_error",
+        },
+        progress_events_payload={
+            "job_id": manifest.job_id,
+            "events": [failed_event],
+        },
+        source_image_artifact_ids=ids,
+    )
+
+    assert updated.status == "FAILED"
+    assert updated.review_items[-1]["safe_reason"] == "configuration_error"
+    assert updated.latest_analysis_artifact_ids["candidate_spec"] is None
+    assert updated.latest_analysis_artifact_ids["validation_report"] is None
+    assert updated.latest_analysis_artifact_ids["correction_plan"] is None
+    assert updated.latest_analysis_artifact_ids["review_correction"] is None
+    assert updated.latest_analysis_artifact_ids["progress_events"].startswith("events_")
+    payload = store.read_latest_analysis_payload(manifest.job_id, "progress_events")
+    assert payload == {"job_id": manifest.job_id, "events": [failed_event]}
 
 
 def test_old_manifest_json_defaults_analysis_artifact_fields(tmp_path):

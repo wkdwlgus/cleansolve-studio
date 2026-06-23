@@ -25,7 +25,15 @@ AnalysisArtifactType = Literal[
 RenderArtifactType = Literal["overlay_svg"]
 ExportFormat = Literal["png"]
 ExportMimeType = Literal["image/png"]
-JobStatus = Literal["CREATED", "APPROVED", "NEEDS_REVIEW", "FAILED", "REVISION_REQUIRED"]
+JobStatus = Literal[
+    "CREATED",
+    "RUNNING",
+    "APPROVED",
+    "NEEDS_REVIEW",
+    "FAILED",
+    "REVISION_REQUIRED",
+    "CANCELLED",
+]
 
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg"}
 MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -58,6 +66,9 @@ ERROR_MESSAGES = {
     "ANALYSIS_ARTIFACT_NOT_FOUND": "분석 artifact를 찾을 수 없습니다.",
     "ANALYSIS_ADAPTER_FAILED": "analysis adapter 실행에 실패했습니다.",
     "ANALYSIS_SOURCE_CHANGED": "분석 실행 중 입력 이미지가 변경되었습니다.",
+    "JOB_ALREADY_RUNNING": "이미 실행 중인 작업입니다.",
+    "JOB_RUN_NOT_RESTARTABLE": "이 작업은 다시 실행할 수 없습니다.",
+    "JOB_RUN_SUBMIT_FAILED": "background 작업을 시작하지 못했습니다.",
     "UNSUPPORTED_IMAGE_TYPE": "지원하지 않는 이미지 형식입니다.",
     "INVALID_IMAGE_BYTES": "이미지 파일 내용이 MIME 형식과 일치하지 않습니다.",
     "EMPTY_IMAGE": "빈 이미지 파일은 업로드할 수 없습니다.",
@@ -318,6 +329,26 @@ def missing_required_images_error(missing_roles: list[ImageRole]) -> HTTPExcepti
     )
 
 
+def job_already_running_error(job_id: str) -> HTTPException:
+    return _error("JOB_ALREADY_RUNNING", status.HTTP_409_CONFLICT, {"job_id": job_id})
+
+
+def job_run_not_restartable_error(job_id: str, status_value: str) -> HTTPException:
+    return _error(
+        "JOB_RUN_NOT_RESTARTABLE",
+        status.HTTP_409_CONFLICT,
+        {"job_id": job_id, "status": status_value},
+    )
+
+
+def job_run_submit_failed_error(job_id: str) -> HTTPException:
+    return _error(
+        "JOB_RUN_SUBMIT_FAILED",
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        {"job_id": job_id},
+    )
+
+
 def job_response(manifest: JobManifest) -> dict[str, Any]:
     return {
         "job_id": manifest.job_id,
@@ -416,6 +447,38 @@ class LocalArtifactStore:
             self.save_manifest(updated_manifest)
             return updated_manifest
 
+    def start_analysis_run(
+        self,
+        job_id: str,
+        *,
+        source_image_artifact_ids: dict[ImageRole, str],
+    ) -> JobManifest:
+        _validate_job_id(job_id)
+        with self._job_lock(job_id):
+            manifest = self.get_job(job_id)
+            if manifest.status == "RUNNING":
+                raise job_already_running_error(job_id)
+            if manifest.status != "CREATED":
+                raise job_run_not_restartable_error(job_id, manifest.status)
+            if manifest.latest_image_artifact_ids != source_image_artifact_ids:
+                raise _error(
+                    "ANALYSIS_SOURCE_CHANGED",
+                    status.HTTP_409_CONFLICT,
+                    {
+                        "source_image_artifact_ids": source_image_artifact_ids,
+                        "latest_image_artifact_ids": manifest.latest_image_artifact_ids,
+                    },
+                )
+            updated_manifest = JobManifest.model_validate(
+                {
+                    **manifest.model_dump(mode="python"),
+                    "status": "RUNNING",
+                    "updated_at": _utc_now(),
+                }
+            )
+            self.save_manifest(updated_manifest)
+            return updated_manifest
+
     def save_failed_analysis_run(
         self,
         job_id: str,
@@ -438,6 +501,60 @@ class LocalArtifactStore:
                     **manifest.model_dump(mode="python"),
                     "status": "FAILED",
                     "review_items": [*manifest.review_items, failed_item],
+                    "updated_at": _utc_now(),
+                }
+            )
+            self.save_manifest(updated_manifest)
+            return updated_manifest
+
+    def save_failed_background_run(
+        self,
+        job_id: str,
+        *,
+        reason: str,
+        review_item: dict[str, Any],
+        progress_events_payload: dict[str, Any],
+        source_image_artifact_ids: dict[ImageRole, str],
+    ) -> JobManifest:
+        _validate_job_id(job_id)
+        with self._job_lock(job_id):
+            manifest = self.get_job(job_id)
+            if manifest.latest_image_artifact_ids != source_image_artifact_ids:
+                raise _error(
+                    "ANALYSIS_SOURCE_CHANGED",
+                    status.HTTP_409_CONFLICT,
+                    {
+                        "source_image_artifact_ids": source_image_artifact_ids,
+                        "latest_image_artifact_ids": manifest.latest_image_artifact_ids,
+                    },
+                )
+            analysis_artifacts = {
+                artifact_type: list(manifest.analysis_artifacts.get(artifact_type, []))
+                for artifact_type in ANALYSIS_ARTIFACT_TYPES
+            }
+            latest_analysis_artifact_ids = {
+                artifact_type: manifest.latest_analysis_artifact_ids.get(artifact_type)
+                for artifact_type in ANALYSIS_ARTIFACT_TYPES
+            }
+            progress_artifact = self._write_analysis_artifact(
+                job_id,
+                "progress_events",
+                progress_events_payload,
+                source_image_artifact_ids,
+            )
+            analysis_artifacts["progress_events"].append(progress_artifact)
+            latest_analysis_artifact_ids["progress_events"] = progress_artifact.artifact_id
+            safe_review_item = {
+                **review_item,
+                "safe_reason": reason,
+            }
+            updated_manifest = JobManifest.model_validate(
+                {
+                    **manifest.model_dump(mode="python"),
+                    "status": "FAILED",
+                    "review_items": [*manifest.review_items, safe_review_item],
+                    "analysis_artifacts": analysis_artifacts,
+                    "latest_analysis_artifact_ids": latest_analysis_artifact_ids,
                     "updated_at": _utc_now(),
                 }
             )
@@ -471,6 +588,8 @@ class LocalArtifactStore:
 
         with self._job_lock(job_id):
             manifest = self.get_job(job_id)
+            if manifest.status != "RUNNING":
+                raise job_run_not_restartable_error(job_id, manifest.status)
             if manifest.latest_image_artifact_ids != source_image_artifact_ids:
                 raise _error(
                     "ANALYSIS_SOURCE_CHANGED",
