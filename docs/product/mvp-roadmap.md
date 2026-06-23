@@ -298,7 +298,7 @@
 
 ### M9. Job Progress SSE Replay UI
 
-상태: Planned
+상태: In Progress
 
 상세 설계: [M9 Job Progress SSE Replay UI 상세 설계](../superpowers/specs/2026-06-23-job-progress-sse-ui-design.md)
 
