@@ -24,7 +24,7 @@
 | Validation | Partial | style, bbox, evidence, dimension anchor, review budget 중심 검증은 있음 |
 | Deterministic renderer | Done | M3 MVP primitive SVG overlay와 source image metadata 보존 지원 |
 | Mock AI adapter | Done | fixture 기반 candidate spec 생성 경로가 있음 |
-| Workflow orchestrator | Partial | LangGraph self-revision prototype에 ReAct review/correction contract, eval gate result, progress event artifact가 추가됐으나 실제 GPT-5.5 planner와 SSE stream은 아직 없음 |
+| Workflow orchestrator | Partial | LangGraph self-revision prototype에 ReAct review/correction contract, eval gate result, progress event artifact가 추가됨. SSE replay UI를 추가한 뒤 background job + live SSE로 확장해야 함 |
 | FastAPI job API | Partial | job 생성, 이미지 upload/artifact 저장, run, spec patch, render, export 기반 endpoint가 있음 |
 | Web editor shell | Done | 이미지 업로드, workflow 실행, candidate spec preview, review panel 표시 흐름이 있음 |
 | HITL policy | Partial | `requires_human_review=true` 필터와 review budget은 구현됨 |
@@ -296,6 +296,59 @@
 - harness가 visible review item count와 budget 초과를 측정한다.
 - MVP 성공 기준 22개에 대한 pass/partial/fail 표가 문서화된다.
 
+### M9. Job Progress SSE Replay UI
+
+상태: Planned
+
+상세 설계: [M9 Job Progress SSE Replay UI 상세 설계](../superpowers/specs/2026-06-23-job-progress-sse-ui-design.md)
+
+목표:
+
+- 저장된 `progress_events` artifact를 SSE 형식으로 replay한다.
+- 웹 editor에 client-side optimistic 단계와 server progress timeline을 표시한다.
+- 긴 review/correction loop에서 사용자가 시스템이 어떤 단계를 거쳤는지 확인할 수 있게 한다.
+
+주요 산출물:
+
+- `GET /jobs/{job_id}/progress-stream`
+- SSE replay helper
+- web progress stream consumer
+- progress timeline state
+- progress panel UI
+- API/web/Playwright smoke test
+
+완료 기준:
+
+- run 완료 후 저장된 progress event가 `text/event-stream`으로 replay된다.
+- 웹에서 `작업을 시작했습니다.` 같은 server progress message가 timeline에 표시된다.
+- SSE replay 실패가 candidate spec/review item 조회를 막지 않는다.
+- 기존 upload-to-review E2E 흐름이 유지된다.
+
+### M10. Background Job & Live SSE
+
+상태: Planned
+
+목표:
+
+- `POST /jobs/{job_id}/run` 또는 새 run 생성 endpoint를 비동기화한다.
+- workflow 실행 중 progress event를 durable store에 flush한다.
+- `GET /jobs/{job_id}/progress-stream`이 실행 중 event를 실시간으로 송출한다.
+- refresh/reconnect 시 이미 생성된 progress event를 replay한다.
+
+주요 산출물:
+
+- background task 또는 worker 실행 계약
+- live progress store
+- `Last-Event-ID` 또는 cursor 기반 replay 정책
+- failed/cancelled job stream contract
+- live SSE API/web/harness E2E
+
+완료 기준:
+
+- 사용자가 workflow 실행 중 실제 server event를 순서대로 볼 수 있다.
+- browser refresh 후에도 누락 없이 진행 timeline을 복원한다.
+- worker failure 또는 analysis adapter failure가 stream과 job 상태에 일관되게 반영된다.
+
 ## SoT MVP 성공 기준 추적
 
 | # | SoT 성공 기준 | 현재 상태 | 연결 milestone |
@@ -333,6 +386,8 @@
 6. `feat/export-foundation`
 7. `feat/openai-adapter`
 8. `feat/mvp-e2e-harness`
+9. `feat/job-progress-sse-ui`
+10. `feat/background-live-sse`
 
 각 PR은 Superpowers 흐름을 따른다.
 
@@ -348,18 +403,19 @@
 
 ## 다음 추천 작업
 
-M8 기준으로 현재 상태는 `Partial MVP`다. 다음 작업은 새 milestone 번호를 미리 고정하지 않고, [MVP Release Checklist](./mvp-release-checklist.md)의 남은 gap 중 하나를 선택해 별도 설계부터 시작한다.
+M8 기준으로 현재 상태는 `Partial MVP`다. 다음 두 작업은 UX 병목과 실행 구조 병목을 분리하기 위해 M9, M10으로 고정한다. 그 이후 작업은 [MVP Release Checklist](./mvp-release-checklist.md)의 남은 gap 중 하나를 선택해 별도 설계부터 시작한다.
 
 `default_pretty_handwriting v1` renderer calibration contract는 완료됐고, 다음 UX 병목은 긴 review/correction loop 진행 상황을 사용자에게 보여주는 것이다.
 
 우선순위 후보:
 
-1. job progress SSE stream과 web progress UI
-2. 실제 GPT-5.5 기반 ReAct planner 연결
-3. 실제 eval model 연결
-4. 실제 OpenAI adapter 결과에 대한 dataset evaluation
-5. production-grade PNG/PDF export와 compositing 품질 개선
-6. Playwright visual regression과 browser full export flow
-7. 치수선 endpoint/source alignment의 이미지 기반 검증
+1. job progress SSE replay stream과 web progress UI
+2. background job + live SSE
+3. 실제 GPT-5.5 기반 ReAct planner 연결
+4. 실제 eval model 연결
+5. 실제 OpenAI adapter 결과에 대한 dataset evaluation
+6. production-grade PNG/PDF export와 compositing 품질 개선
+7. Playwright visual regression과 browser full export flow
+8. 치수선 endpoint/source alignment의 이미지 기반 검증
 
-현재 추천 순서는 1번이다. 이유는 mock progress event artifact는 저장되지만, 긴 AI 분석/보정 loop 동안 사용자가 진행 상황을 볼 수 있는 SSE stream과 web progress UI가 아직 없기 때문이다. 이 작업은 [AI Review & Correction Workflow](../architecture/ai-review-correction-workflow.md)의 review/correction loop를 사용자에게 노출하는 UX 계약부터 시작한다.
+현재 추천 순서는 1번을 먼저 구현하고, 바로 다음 작업으로 2번을 별도 설계/구현하는 것이다. 이유는 mock progress event artifact는 저장되지만, 긴 AI 분석/보정 loop 동안 사용자가 진행 상황을 볼 수 있는 UI 계약이 아직 없고, 실시간 live SSE는 run 비동기화와 durable progress flush 계약이 필요해 별도 milestone으로 분리해야 하기 때문이다.
