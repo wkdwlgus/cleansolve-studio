@@ -34,6 +34,7 @@ def build_graph():
         _route_after_validation,
         {
             "render_preview": "render_preview",
+            "inspect_render": "inspect_render",
             "require_revision": "require_revision",
         },
     )
@@ -48,7 +49,14 @@ def build_graph():
         },
     )
     graph.add_edge("plan_correction", "apply_correction")
-    graph.add_edge("apply_correction", "validate_spec")
+    graph.add_conditional_edges(
+        "apply_correction",
+        _route_after_correction,
+        {
+            "validate_spec": "validate_spec",
+            "require_revision": "require_revision",
+        },
+    )
     graph.add_edge("decide_human_review", END)
     graph.add_edge("require_revision", END)
     return graph.compile()
@@ -76,6 +84,10 @@ def run_mock_workflow(
         "status_history": ["CREATED"],
         "validation_reports": [],
         "correction_plans": [],
+        "review_attempts": [],
+        "progress_events": [],
+        "review_tool_decisions": [],
+        "review_event_sequence": 0,
         "revision_attempts": 0,
         "max_revision_attempts": max_revision_attempts,
         "review_items": [],
@@ -101,14 +113,43 @@ def run_mock_workflow(
 
 
 def _route_after_validation(state: WorkflowState) -> str:
+    if state["validation_reports"][-1].passed and state.get("rendered_preview") is not None:
+        return "inspect_render"
     if state["validation_reports"][-1].passed:
         return "render_preview"
     return "require_revision"
 
 
 def _route_after_inspection(state: WorkflowState) -> str:
-    if state.get("inspection_issue") is None:
+    latest_gate_result = state.get("latest_gate_result")
+    if latest_gate_result is not None and latest_gate_result.passed:
         return "decide_human_review"
-    if state.get("revision_attempts", 0) >= state.get("max_revision_attempts", 2):
+
+    decisions = state.get("review_tool_decisions", [])
+    latest_decision = decisions[-1] if decisions else None
+    if latest_decision is None:
         return "require_revision"
-    return "plan_correction"
+    if latest_decision.tool_name == "patch_candidate_spec":
+        return "plan_correction"
+    if (
+        latest_decision.tool_name == "escalate_hitl"
+        and latest_decision.reason_code == "low_confidence"
+        and latest_gate_result is not None
+        and latest_gate_result.failed_reasons == ["visible_review_item_budget_exceeded"]
+    ):
+        return "decide_human_review"
+    if latest_decision.tool_name in {"request_handwriting_asset", "escalate_hitl"}:
+        return "require_revision"
+    return "require_revision"
+
+
+def _route_after_correction(state: WorkflowState) -> str:
+    decisions = state.get("review_tool_decisions", [])
+    latest_decision = decisions[-1] if decisions else None
+    if (
+        latest_decision is not None
+        and latest_decision.tool_name == "escalate_hitl"
+        and latest_decision.reason_code == "repeated_element_patch"
+    ):
+        return "require_revision"
+    return "validate_spec"
