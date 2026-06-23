@@ -528,6 +528,8 @@ class LocalArtifactStore:
                         "latest_image_artifact_ids": manifest.latest_image_artifact_ids,
                     },
                 )
+            if manifest.status != "RUNNING":
+                raise job_run_not_restartable_error(job_id, manifest.status)
             analysis_artifacts = {
                 artifact_type: list(manifest.analysis_artifacts.get(artifact_type, []))
                 for artifact_type in ANALYSIS_ARTIFACT_TYPES
@@ -545,7 +547,10 @@ class LocalArtifactStore:
             analysis_artifacts["progress_events"].append(progress_artifact)
             latest_analysis_artifact_ids["progress_events"] = progress_artifact.artifact_id
             safe_review_item = {
-                **review_item,
+                "type": review_item.get("type"),
+                "client": review_item.get("client"),
+                "retryable": review_item.get("retryable"),
+                "review_reason": review_item.get("review_reason"),
                 "safe_reason": reason,
             }
             updated_manifest = JobManifest.model_validate(

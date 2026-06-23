@@ -180,6 +180,10 @@ def run_job(job_id: str) -> dict[str, object]:
         role: str(path)
         for role, path in store.latest_image_artifact_paths(job_id).items()
     }
+    store.start_analysis_run(
+        job_id,
+        source_image_artifact_ids=source_image_artifact_ids,
+    )
     try:
         state = run_mock_workflow(
             job_id=job_id,

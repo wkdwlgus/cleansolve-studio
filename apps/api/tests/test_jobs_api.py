@@ -524,6 +524,36 @@ def test_settings_reject_non_positive_openai_timeout(monkeypatch):
         Settings()
 
 
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "CLEANSOLVE_BACKGROUND_MAX_WORKERS",
+        "CLEANSOLVE_PROGRESS_POLL_INTERVAL_MS",
+        "CLEANSOLVE_PROGRESS_HEARTBEAT_SECONDS",
+    ],
+)
+def test_settings_reject_non_integer_background_progress_values(monkeypatch, env_name):
+    monkeypatch.setenv(env_name, "abc")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "CLEANSOLVE_BACKGROUND_MAX_WORKERS",
+        "CLEANSOLVE_PROGRESS_POLL_INTERVAL_MS",
+        "CLEANSOLVE_PROGRESS_HEARTBEAT_SECONDS",
+    ],
+)
+def test_settings_reject_non_positive_background_progress_values(monkeypatch, env_name):
+    monkeypatch.setenv(env_name, "0")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_manifest_store_rejects_invalid_workflow_status(tmp_path):
     store = LocalArtifactStore(tmp_path / "jobs")
     manifest = store.create_job()
@@ -644,6 +674,74 @@ def test_store_save_failed_background_run_persists_only_safe_progress_events(tmp
     assert updated.latest_analysis_artifact_ids["progress_events"].startswith("events_")
     payload = store.read_latest_analysis_payload(manifest.job_id, "progress_events")
     assert payload == {"job_id": manifest.job_id, "events": [failed_event]}
+
+
+def test_store_save_failed_background_run_persists_only_safe_review_item_fields(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    manifest.status = "RUNNING"
+    store.save_manifest(manifest)
+
+    updated = store.save_failed_background_run(
+        manifest.job_id,
+        reason="configuration_error",
+        review_item={
+            "type": "analysis_adapter_failed",
+            "client": "openai",
+            "retryable": True,
+            "review_reason": None,
+            "safe_reason": "caller_reason",
+            "exception_message": "raw exception",
+            "local_path": "/tmp/private/input.png",
+            "prompt": "raw prompt",
+            "api_key": "sk-secret",
+            "source_image_paths": {"problem": "/tmp/private/problem.png"},
+        },
+        progress_events_payload={"job_id": manifest.job_id, "events": []},
+        source_image_artifact_ids=ids,
+    )
+
+    assert updated.review_items[-1] == {
+        "type": "analysis_adapter_failed",
+        "client": "openai",
+        "retryable": True,
+        "review_reason": None,
+        "safe_reason": "configuration_error",
+    }
+
+
+@pytest.mark.parametrize("status_value", ["CREATED", "APPROVED"])
+def test_store_save_failed_background_run_rejects_non_running_job(tmp_path, status_value):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    manifest.status = status_value
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.save_failed_background_run(
+            manifest.job_id,
+            reason="configuration_error",
+            review_item={
+                "type": "analysis_adapter_failed",
+                "client": "openai",
+                "retryable": True,
+                "review_reason": None,
+            },
+            progress_events_payload={"job_id": manifest.job_id, "events": []},
+            source_image_artifact_ids=ids,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "JOB_RUN_NOT_RESTARTABLE"
+    assert exc_info.value.detail["fields"] == {
+        "job_id": manifest.job_id,
+        "status": status_value,
+    }
+    assert store.get_job(manifest.job_id).status == status_value
 
 
 def test_old_manifest_json_defaults_analysis_artifact_fields(tmp_path):
