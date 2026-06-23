@@ -1,5 +1,8 @@
+import json
+from collections.abc import Iterable
+
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from cleansolve_ai import OpenAIAdapterError, OpenAIConfigurationError
@@ -45,6 +48,44 @@ def _safe_adapter_reason(exc: OpenAIAdapterError) -> str:
     if isinstance(exc, OpenAIConfigurationError):
         return "configuration_error"
     return "response_error"
+
+
+def _sse_frame(
+    *,
+    event: str,
+    data: dict[str, object],
+    event_id: str | None = None,
+) -> str:
+    lines = []
+    if event_id is not None:
+        lines.append(f"id: {event_id}")
+    lines.append(f"event: {event}")
+    lines.append(f"data: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _progress_event_stream(payload: dict[str, object]) -> Iterable[str]:
+    events = payload.get("events")
+    if not isinstance(events, list):
+        events = []
+    sorted_events = sorted(
+        (event for event in events if isinstance(event, dict)),
+        key=lambda event: event.get("sequence", 0),
+    )
+    for event in sorted_events:
+        event_id = event.get("event_id")
+        yield _sse_frame(
+            event="progress",
+            event_id=event_id if isinstance(event_id, str) else None,
+            data=event,
+        )
+    yield _sse_frame(
+        event="complete",
+        data={
+            "job_id": payload.get("job_id", ""),
+            "event_count": len(sorted_events),
+        },
+    )
 
 
 class ExportRequest(BaseModel):
@@ -375,6 +416,19 @@ def get_review_correction(job_id: str) -> dict[str, object]:
 @router.get("/{job_id}/progress-events")
 def get_progress_events(job_id: str) -> dict[str, object]:
     return _store().read_latest_analysis_payload(job_id, "progress_events")
+
+
+@router.get("/{job_id}/progress-stream")
+def stream_progress_events(job_id: str) -> StreamingResponse:
+    payload = _store().read_latest_analysis_payload(job_id, "progress_events")
+    return StreamingResponse(
+        _progress_event_stream(payload),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/{job_id}/review-items")

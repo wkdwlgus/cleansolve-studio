@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from cleansolve_api.artifacts import ExportArtifact, LocalArtifactStore
 from cleansolve_api.main import app
 from cleansolve_api.routes import jobs
+from cleansolve_api.routes.jobs import _sse_frame
 from cleansolve_api.settings import Settings
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -235,6 +236,56 @@ def test_progress_events_endpoint_returns_404_before_run():
 
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "ANALYSIS_ARTIFACT_NOT_FOUND"
+
+
+def test_progress_stream_replays_saved_progress_events_as_sse():
+    client = TestClient(app)
+    job = client.post("/jobs").json()
+    job_id = job["job_id"]
+    upload_required_images(client, job_id)
+    run_response = client.post(f"/jobs/{job_id}/run")
+
+    response = client.get(f"/jobs/{job_id}/progress-stream")
+
+    assert run_response.status_code == 200
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+    body = response.text
+    assert "id: evt_0000\n" in body
+    assert "event: progress\n" in body
+    assert "data:" in body
+    assert '"message":"작업을 시작했습니다."' in body
+    assert "event: complete\n" in body
+    assert '"event_count":' in body
+    assert "source_image_paths" not in body
+
+
+def test_progress_stream_returns_404_before_run():
+    client = TestClient(app)
+    job = client.post("/jobs").json()
+
+    response = client.get(f"/jobs/{job['job_id']}/progress-stream")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "ANALYSIS_ARTIFACT_NOT_FOUND"
+
+
+def test_sse_frame_serializes_korean_without_ascii_escape():
+    frame = _sse_frame(
+        event="progress",
+        event_id="evt_0000",
+        data={"message": "작업을 시작했습니다."},
+    )
+
+    assert frame == (
+        'id: evt_0000\n'
+        'event: progress\n'
+        'data: {"message":"작업을 시작했습니다."}\n\n'
+    )
+    assert "\\uc791" not in frame
+    assert frame.endswith("\n\n")
 
 
 def test_get_unknown_job_returns_structured_404():
