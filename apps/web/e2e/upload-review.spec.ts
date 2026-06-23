@@ -49,6 +49,18 @@ test('uploads fixture images and renders approved preview', async ({ page }) => 
     });
   });
 
+  await page.route('**/jobs/job_e2e/progress-stream', async (route) => {
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body:
+        'id: evt_0000\n' +
+        'event: progress\n' +
+        'data: {"event_id":"evt_0000","job_id":"job_e2e","sequence":0,"phase":"analysis","status":"CREATED","message":"작업을 시작했습니다.","attempt":0,"max_attempts":2,"scores":null,"next_action":"continue","created_at":"2026-06-23T00:00:00Z"}\n\n' +
+        'event: complete\n' +
+        'data: {"job_id":"job_e2e","event_count":1}\n\n'
+    });
+  });
+
   await page.route('**/jobs/job_e2e/candidate-spec', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -81,6 +93,11 @@ test('uploads fixture images and renders approved preview', async ({ page }) => 
   await page.getByLabel('선생님 손풀이 이미지').setInputFiles(path.join(fixtureRoot, 'teacher_solution.png'));
   await page.getByRole('button', { name: '업로드 후 분석 실행' }).click();
 
+  const progressPanel = page.getByLabel('진행 상황');
+  await expect(progressPanel).toBeVisible();
+  await expect(progressPanel).toHaveAttribute('role', 'status');
+  await expect(progressPanel).toHaveAttribute('aria-live', 'polite');
+  await expect(progressPanel).toContainText('작업을 시작했습니다.');
   await expect(page.getByText('자동 검토 완료')).toBeVisible();
   await expect(page.getByLabel('candidate spec 기반 미리보기 캔버스')).toBeVisible();
   await expect(page.getByText('검토 항목 0')).toBeVisible();
