@@ -187,7 +187,10 @@ export function streamProgressEvents(
 
   source.addEventListener('progress', (event) => {
     try {
-      const payload = JSON.parse(event.data) as ProgressEventPayload;
+      const payload = JSON.parse(event.data);
+      if (!isProgressEventPayload(payload)) {
+        throw new Error('invalid progress event payload');
+      }
       onProgress?.(payload);
     } catch {
       onError?.(new Error('진행 상황을 해석하지 못했습니다.'));
@@ -391,10 +394,14 @@ function isProgressEventPayload(value: unknown): value is ProgressEventPayload {
     typeof value.message === 'string' &&
     isNumber(value.attempt) &&
     isNumber(value.max_attempts) &&
-    (isRecord(value.scores) || value.scores === null) &&
+    (isNumberRecord(value.scores) || value.scores === null) &&
     typeof value.next_action === 'string' &&
     typeof value.created_at === 'string'
   );
+}
+
+function isNumberRecord(value: unknown): value is Record<string, number> {
+  return isRecord(value) && Object.values(value).every(isNumber);
 }
 
 function normalizeCandidateSpec(payload: unknown, fallbackJobId: string): CandidateSpecPreview {

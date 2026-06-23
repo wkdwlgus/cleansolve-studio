@@ -326,6 +326,21 @@ describe('editor API client', () => {
     expect(source.closeCount).toBe(1);
   });
 
+  it('closes stream and reports Korean error for malformed progress payload shape', () => {
+    const source = new FakeEventSource();
+    const errors: string[] = [];
+
+    streamProgressEvents('job_test', {
+      eventSourceFactory: () => source,
+      onError: (error) => errors.push(error.message)
+    });
+
+    source.emit('progress', JSON.stringify({ ...progressEventPayload, scores: { visual_diff: 'bad' } }));
+
+    expect(errors).toEqual(['진행 상황을 해석하지 못했습니다.']);
+    expect(source.closeCount).toBe(1);
+  });
+
   it('replays progress events into an array', async () => {
     const source = new FakeEventSource();
     const seen: string[] = [];
@@ -347,7 +362,11 @@ describe('editor API client', () => {
       expect(url).toBe('/jobs/job_test/progress-events');
       return Response.json({
         job_id: 'job_test',
-        events: [progressEventPayload, { event_id: 42, message: 'bad', status: 'BAD', sequence: 1 }]
+        events: [
+          progressEventPayload,
+          { event_id: 42, message: 'bad', status: 'BAD', sequence: 1 },
+          { ...progressEventPayload, event_id: 'evt_bad_scores', sequence: 2, scores: { visual_diff: 'bad' } }
+        ]
       });
     };
 
@@ -423,5 +442,171 @@ describe('editor API client', () => {
         review_reason: 'Endpoint needs operator review.'
       }
     ]);
+  });
+
+  it('falls back to progress fetch when EventSource creation throws', async () => {
+    const problemFile = new File(['problem'], 'problem.png', { type: 'image/png' });
+    const teacherFile = new File(['teacher'], 'teacher.png', { type: 'image/png' });
+    const calls: string[] = [];
+    const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      if (url === '/jobs' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'CREATED' }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/problem' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/teacher-solution' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/run' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'APPROVED', revision_attempts: 1 });
+      }
+      if (url === '/jobs/job_test/progress-events') {
+        return Response.json({ job_id: 'job_test', events: [progressEventPayload] });
+      }
+      if (url === '/jobs/job_test/candidate-spec') {
+        return Response.json({ job_id: 'job_test', version: 1, page: { width: 1, height: 1 }, elements: [] });
+      }
+      if (url === '/jobs/job_test/review-items') {
+        return Response.json({ items: [] });
+      }
+      return Response.json({ detail: 'not found' }, { status: 404 });
+    };
+
+    const result = await runUploadToReviewWorkflow(
+      { problemFile, teacherSolutionFile: teacherFile },
+      {
+        fetcher,
+        eventSourceFactory: () => {
+          throw new Error('EventSource unavailable');
+        }
+      }
+    );
+
+    expect(result.progressEvents).toEqual([progressEventPayload]);
+    expect(calls).toContain('GET /jobs/job_test/progress-events');
+  });
+
+  it('swallows progress collection failures and continues review loading', async () => {
+    const problemFile = new File(['problem'], 'problem.png', { type: 'image/png' });
+    const teacherFile = new File(['teacher'], 'teacher.png', { type: 'image/png' });
+    const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url === '/jobs' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'CREATED' }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/problem' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/teacher-solution' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/run' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'APPROVED', revision_attempts: 1 });
+      }
+      if (url === '/jobs/job_test/progress-events') {
+        return Response.json({ detail: 'missing progress' }, { status: 404 });
+      }
+      if (url === '/jobs/job_test/candidate-spec') {
+        return Response.json({ job_id: 'job_test', version: 1, page: { width: 1, height: 1 }, elements: [] });
+      }
+      if (url === '/jobs/job_test/review-items') {
+        return Response.json({ items: [] });
+      }
+      return Response.json({ detail: 'not found' }, { status: 404 });
+    };
+
+    const result = await runUploadToReviewWorkflow(
+      { problemFile, teacherSolutionFile: teacherFile },
+      {
+        fetcher,
+        eventSourceFactory: () => {
+          throw new Error('EventSource unavailable');
+        }
+      }
+    );
+
+    expect(result.progressEvents).toEqual([]);
+    expect(result.candidateSpec).toMatchObject({ job_id: 'job_test', version: 1 });
+    expect(result.reviewItems).toEqual([]);
+  });
+
+  it('still rejects candidate spec failures after progress collection fails', async () => {
+    const problemFile = new File(['problem'], 'problem.png', { type: 'image/png' });
+    const teacherFile = new File(['teacher'], 'teacher.png', { type: 'image/png' });
+    const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url === '/jobs' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'CREATED' }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/problem' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/teacher-solution' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/run' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'APPROVED', revision_attempts: 1 });
+      }
+      if (url === '/jobs/job_test/progress-events') {
+        return Response.json({ detail: 'missing progress' }, { status: 404 });
+      }
+      if (url === '/jobs/job_test/candidate-spec') {
+        return Response.json({ detail: 'missing spec' }, { status: 404 });
+      }
+      return Response.json({ detail: 'not found' }, { status: 404 });
+    };
+
+    await expect(
+      runUploadToReviewWorkflow(
+        { problemFile, teacherSolutionFile: teacherFile },
+        {
+          fetcher,
+          eventSourceFactory: () => {
+            throw new Error('EventSource unavailable');
+          }
+        }
+      )
+    ).rejects.toThrow('미리보기 정보를 불러오지 못했습니다.');
+  });
+
+  it('still rejects review item failures after progress collection fails', async () => {
+    const problemFile = new File(['problem'], 'problem.png', { type: 'image/png' });
+    const teacherFile = new File(['teacher'], 'teacher.png', { type: 'image/png' });
+    const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url === '/jobs' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'CREATED' }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/problem' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/images/teacher-solution' && init?.method === 'POST') {
+        return Response.json({ ok: true }, { status: 201 });
+      }
+      if (url === '/jobs/job_test/run' && init?.method === 'POST') {
+        return Response.json({ job_id: 'job_test', status: 'APPROVED', revision_attempts: 1 });
+      }
+      if (url === '/jobs/job_test/progress-events') {
+        return Response.json({ detail: 'missing progress' }, { status: 404 });
+      }
+      if (url === '/jobs/job_test/candidate-spec') {
+        return Response.json({ job_id: 'job_test', version: 1, page: { width: 1, height: 1 }, elements: [] });
+      }
+      if (url === '/jobs/job_test/review-items') {
+        return Response.json({ detail: 'missing review items' }, { status: 404 });
+      }
+      return Response.json({ detail: 'not found' }, { status: 404 });
+    };
+
+    await expect(
+      runUploadToReviewWorkflow(
+        { problemFile, teacherSolutionFile: teacherFile },
+        {
+          fetcher,
+          eventSourceFactory: () => {
+            throw new Error('EventSource unavailable');
+          }
+        }
+      )
+    ).rejects.toThrow('검토 항목을 불러오지 못했습니다.');
   });
 });
