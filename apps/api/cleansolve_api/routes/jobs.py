@@ -1,9 +1,10 @@
 import json
+import re
 from collections.abc import Iterable
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from cleansolve_ai import OpenAIAdapterError, OpenAIConfigurationError
 from cleansolve_api.artifacts import (
@@ -28,9 +29,24 @@ from cleansolve_renderer.export_png import render_export_png
 from cleansolve_renderer.overlay import render_overlay_svg
 from cleansolve_spec.models import CandidateSpec
 from cleansolve_spec.validation import validate_candidate_spec
-from cleansolve_workflow.graph import run_mock_workflow
+from cleansolve_workflow import ProgressEvent, run_mock_workflow
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+SSE_EVENT_ID_PATTERN = re.compile(r"^evt_\d{4,}$")
+PROGRESS_EVENT_PUBLIC_FIELDS = (
+    "event_id",
+    "job_id",
+    "sequence",
+    "phase",
+    "status",
+    "message",
+    "attempt",
+    "max_attempts",
+    "scores",
+    "next_action",
+    "created_at",
+)
 
 
 def _store() -> LocalArtifactStore:
@@ -50,6 +66,26 @@ def _safe_adapter_reason(exc: OpenAIAdapterError) -> str:
     return "response_error"
 
 
+def _safe_sse_event_id(value: str) -> str | None:
+    if SSE_EVENT_ID_PATTERN.fullmatch(value) is None:
+        return None
+    return value
+
+
+def _public_progress_event(event: dict[str, object]) -> dict[str, object] | None:
+    projected = {field: event.get(field) for field in PROGRESS_EVENT_PUBLIC_FIELDS}
+    try:
+        validated = ProgressEvent.model_validate(projected)
+    except ValidationError:
+        return None
+    event_id = _safe_sse_event_id(validated.event_id)
+    if event_id is None:
+        return None
+    payload = validated.model_dump(mode="json")
+    payload["event_id"] = event_id
+    return payload
+
+
 def _sse_frame(
     *,
     event: str,
@@ -58,7 +94,9 @@ def _sse_frame(
 ) -> str:
     lines = []
     if event_id is not None:
-        lines.append(f"id: {event_id}")
+        safe_event_id = _safe_sse_event_id(event_id)
+        if safe_event_id is not None:
+            lines.append(f"id: {safe_event_id}")
     lines.append(f"event: {event}")
     lines.append(f"data: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}")
     return "\n".join(lines) + "\n\n"
@@ -68,21 +106,24 @@ def _progress_event_stream(payload: dict[str, object]) -> Iterable[str]:
     events = payload.get("events")
     if not isinstance(events, list):
         events = []
-    sorted_events = sorted(
-        (event for event in events if isinstance(event, dict)),
-        key=lambda event: event.get("sequence", 0),
-    )
+    projected_events = [
+        projected
+        for event in events
+        if isinstance(event, dict)
+        for projected in [_public_progress_event(event)]
+        if projected is not None
+    ]
+    sorted_events = sorted(projected_events, key=lambda event: event["sequence"])
     for event in sorted_events:
-        event_id = event.get("event_id")
         yield _sse_frame(
             event="progress",
-            event_id=event_id if isinstance(event_id, str) else None,
+            event_id=event["event_id"],
             data=event,
         )
     yield _sse_frame(
         event="complete",
         data={
-            "job_id": payload.get("job_id", ""),
+            "job_id": payload.get("job_id") if isinstance(payload.get("job_id"), str) else "",
             "event_count": len(sorted_events),
         },
     )
