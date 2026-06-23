@@ -12,6 +12,31 @@ export interface ReviewItemsResponse {
   items: ApiReviewItem[];
 }
 
+export interface ProgressEventPayload {
+  event_id: string;
+  job_id: string;
+  sequence: number;
+  phase: string;
+  status: string;
+  message: string;
+  attempt: number;
+  max_attempts: number;
+  scores: Record<string, number> | null;
+  next_action: string;
+  created_at: string;
+}
+
+export interface ProgressEventsResponse {
+  job_id: string;
+  events: unknown[];
+}
+
+export interface EventSourceLike {
+  addEventListener(type: string, listener: (event: MessageEvent) => void): void;
+  close(): void;
+  onerror: ((event: Event) => void) | null;
+}
+
 export interface EditorJob {
   jobId: string;
   status: string;
@@ -23,6 +48,8 @@ interface LoadEditorJobOptions {
   baseUrl?: string;
   fetcher?: typeof fetch;
   onPhase?: (phase: 'creating' | 'uploading' | 'running') => void;
+  onProgress?: (event: ProgressEventPayload) => void;
+  eventSourceFactory?: (url: string) => EventSourceLike;
 }
 
 export interface CandidateSpecElement {
@@ -89,6 +116,7 @@ export interface UploadToReviewInput {
 
 export interface UploadToReviewResult extends EditorJob {
   candidateSpec: CandidateSpecPreview | null;
+  progressEvents: ProgressEventPayload[];
 }
 
 type ApiReviewItem = Omit<ReviewItem, 'requires_human_review' | 'resolved'> &
@@ -130,6 +158,94 @@ export async function getReviewItems(
   const response = await fetcher(`${baseUrl}/jobs/${jobId}/review-items`);
   const payload = await readJson<ReviewItemsResponse>(response, '검토 항목을 불러오지 못했습니다.');
   return payload.items.map(normalizeReviewItem);
+}
+
+export function streamProgressEvents(
+  jobId: string,
+  {
+    baseUrl = '',
+    eventSourceFactory = (url: string) => new EventSource(url),
+    onProgress,
+    onComplete,
+    onError
+  }: {
+    baseUrl?: string;
+    eventSourceFactory?: (url: string) => EventSourceLike;
+    onProgress?: (event: ProgressEventPayload) => void;
+    onComplete?: () => void;
+    onError?: (error: Error) => void;
+  } = {}
+): () => void {
+  let closed = false;
+  const source = eventSourceFactory(`${baseUrl}/jobs/${jobId}/progress-stream`);
+  const close = () => {
+    if (!closed) {
+      closed = true;
+      source.close();
+    }
+  };
+
+  source.addEventListener('progress', (event) => {
+    try {
+      const payload = JSON.parse(event.data) as ProgressEventPayload;
+      onProgress?.(payload);
+    } catch {
+      onError?.(new Error('진행 상황을 해석하지 못했습니다.'));
+      close();
+    }
+  });
+
+  source.addEventListener('complete', () => {
+    onComplete?.();
+    close();
+  });
+
+  source.onerror = () => {
+    onError?.(new Error('진행 상황 연결이 끊겼습니다.'));
+    close();
+  };
+
+  return close;
+}
+
+export async function replayProgressEvents(
+  jobId: string,
+  {
+    baseUrl = '',
+    eventSourceFactory,
+    onProgress
+  }: {
+    baseUrl?: string;
+    eventSourceFactory?: (url: string) => EventSourceLike;
+    onProgress?: (event: ProgressEventPayload) => void;
+  } = {}
+): Promise<ProgressEventPayload[]> {
+  return new Promise((resolve, reject) => {
+    const events: ProgressEventPayload[] = [];
+    streamProgressEvents(jobId, {
+      baseUrl,
+      eventSourceFactory,
+      onProgress: (event) => {
+        events.push(event);
+        onProgress?.(event);
+      },
+      onComplete: () => resolve(events),
+      onError: reject
+    });
+  });
+}
+
+export async function getProgressEvents(
+  jobId: string,
+  baseUrl = '',
+  fetcher: typeof fetch = fetch
+): Promise<ProgressEventPayload[]> {
+  const response = await fetcher(`${baseUrl}/jobs/${jobId}/progress-events`);
+  const payload = await readJson<ProgressEventsResponse>(response, '진행 상황을 불러오지 못했습니다.');
+  if (!Array.isArray(payload.events)) {
+    return [];
+  }
+  return payload.events.filter(isProgressEventPayload);
 }
 
 export async function uploadImage(
@@ -197,7 +313,7 @@ export async function getRenderedPreview(
 
 export async function runUploadToReviewWorkflow(
   input: UploadToReviewInput,
-  { baseUrl = '', fetcher = fetch, onPhase }: LoadEditorJobOptions = {}
+  { baseUrl = '', fetcher = fetch, onPhase, onProgress, eventSourceFactory }: LoadEditorJobOptions = {}
 ): Promise<UploadToReviewResult> {
   onPhase?.('creating');
   const created = await createJob(baseUrl, fetcher);
@@ -206,6 +322,12 @@ export async function runUploadToReviewWorkflow(
   await uploadImage(created.job_id, 'teacher_solution', input.teacherSolutionFile, baseUrl, fetcher);
   onPhase?.('running');
   const run = await runJob(created.job_id, baseUrl, fetcher);
+  const progressEvents = await collectProgressEvents(created.job_id, {
+    baseUrl,
+    fetcher,
+    eventSourceFactory,
+    onProgress
+  });
   const candidateSpec = await getCandidateSpec(created.job_id, baseUrl, fetcher);
   const reviewItems = await getReviewItems(created.job_id, baseUrl, fetcher);
 
@@ -214,8 +336,38 @@ export async function runUploadToReviewWorkflow(
     status: run.status,
     revisionAttempts: run.revision_attempts ?? 0,
     reviewItems,
-    candidateSpec
+    candidateSpec,
+    progressEvents
   };
+}
+
+async function collectProgressEvents(
+  jobId: string,
+  {
+    baseUrl,
+    fetcher,
+    eventSourceFactory,
+    onProgress
+  }: {
+    baseUrl: string;
+    fetcher: typeof fetch;
+    eventSourceFactory?: (url: string) => EventSourceLike;
+    onProgress?: (event: ProgressEventPayload) => void;
+  }
+): Promise<ProgressEventPayload[]> {
+  try {
+    return await replayProgressEvents(jobId, { baseUrl, eventSourceFactory, onProgress });
+  } catch {
+    try {
+      const events = await getProgressEvents(jobId, baseUrl, fetcher);
+      for (const event of events) {
+        onProgress?.(event);
+      }
+      return events;
+    } catch {
+      return [];
+    }
+  }
 }
 
 function normalizeReviewItem(item: ApiReviewItem): ReviewItem {
@@ -224,6 +376,25 @@ function normalizeReviewItem(item: ApiReviewItem): ReviewItem {
     requires_human_review: item.requires_human_review ?? true,
     resolved: item.resolved ?? false
   };
+}
+
+function isProgressEventPayload(value: unknown): value is ProgressEventPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    typeof value.event_id === 'string' &&
+    typeof value.job_id === 'string' &&
+    isNumber(value.sequence) &&
+    typeof value.phase === 'string' &&
+    typeof value.status === 'string' &&
+    typeof value.message === 'string' &&
+    isNumber(value.attempt) &&
+    isNumber(value.max_attempts) &&
+    (isRecord(value.scores) || value.scores === null) &&
+    typeof value.next_action === 'string' &&
+    typeof value.created_at === 'string'
+  );
 }
 
 function normalizeCandidateSpec(payload: unknown, fallbackJobId: string): CandidateSpecPreview {

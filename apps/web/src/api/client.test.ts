@@ -1,12 +1,54 @@
 import { describe, expect, it } from 'vitest';
 import {
   getCandidateSpec,
+  getProgressEvents,
   getRenderedPreview,
   loadEditorJob,
   patchCandidateSpec,
   renderJobPreview,
-  runUploadToReviewWorkflow
+  replayProgressEvents,
+  runUploadToReviewWorkflow,
+  streamProgressEvents,
+  type EventSourceLike
 } from './client';
+
+class FakeEventSource implements EventSourceLike {
+  listeners: Record<string, Array<(event: MessageEvent) => void>> = {};
+  onerror: ((event: Event) => void) | null = null;
+  closeCount = 0;
+
+  addEventListener(type: string, listener: (event: MessageEvent) => void): void {
+    this.listeners[type] = [...(this.listeners[type] ?? []), listener];
+  }
+
+  emit(type: string, data: string): void {
+    for (const listener of this.listeners[type] ?? []) {
+      listener(new MessageEvent(type, { data }));
+    }
+  }
+
+  fail(): void {
+    this.onerror?.(new Event('error'));
+  }
+
+  close(): void {
+    this.closeCount += 1;
+  }
+}
+
+const progressEventPayload = {
+  event_id: 'evt_0000',
+  job_id: 'job_test',
+  sequence: 0,
+  phase: 'analysis',
+  status: 'CREATED',
+  message: '작업을 시작했습니다.',
+  attempt: 0,
+  max_attempts: 2,
+  scores: null,
+  next_action: 'continue',
+  created_at: '2026-06-23T00:00:00Z'
+};
 
 describe('editor API client', () => {
   it('uploads both images, runs workflow, and loads candidate spec plus review items', async () => {
@@ -49,6 +91,10 @@ describe('editor API client', () => {
         return Response.json({ job_id: 'job_test', status: 'NEEDS_REVIEW', revision_attempts: 1 });
       }
 
+      if (url === '/jobs/job_test/progress-events') {
+        return Response.json({ job_id: 'job_test', events: [progressEventPayload] });
+      }
+
       if (url === '/jobs/job_test/candidate-spec') {
         return Response.json({
           job_id: 'job_test',
@@ -70,7 +116,13 @@ describe('editor API client', () => {
     const phases: string[] = [];
     const result = await runUploadToReviewWorkflow(
       { problemFile, teacherSolutionFile: teacherFile },
-      { fetcher, onPhase: (phase) => phases.push(phase) }
+      {
+        fetcher,
+        eventSourceFactory: () => {
+          throw new Error('EventSource unavailable in this test');
+        },
+        onPhase: (phase) => phases.push(phase)
+      }
     );
 
     expect(calls).toEqual([
@@ -83,6 +135,7 @@ describe('editor API client', () => {
         fileName: 'teacher.png'
       },
       { url: '/jobs/job_test/run', method: 'POST', bodyType: 'none', fileName: undefined },
+      { url: '/jobs/job_test/progress-events', method: 'GET', bodyType: 'none', fileName: undefined },
       { url: '/jobs/job_test/candidate-spec', method: 'GET', bodyType: 'none', fileName: undefined },
       { url: '/jobs/job_test/review-items', method: 'GET', bodyType: 'none', fileName: undefined }
     ]);
@@ -102,6 +155,7 @@ describe('editor API client', () => {
       resolved: false
     });
     expect(phases).toEqual(['creating', 'uploading', 'running']);
+    expect(result.progressEvents).toEqual([progressEventPayload]);
   });
 
   it('stops workflow when problem image upload fails', async () => {
@@ -230,6 +284,74 @@ describe('editor API client', () => {
       { url: '/jobs/job_test/render', method: 'POST' },
       { url: '/jobs/job_test/rendered-preview', method: 'GET' }
     ]);
+  });
+
+  it('streams progress events with an injected EventSource', () => {
+    const source = new FakeEventSource();
+    const progressEvents: unknown[] = [];
+    let completed = false;
+
+    const unsubscribe = streamProgressEvents('job_test', {
+      eventSourceFactory: (url) => {
+        expect(url).toBe('/jobs/job_test/progress-stream');
+        return source;
+      },
+      onProgress: (event) => progressEvents.push(event),
+      onComplete: () => {
+        completed = true;
+      }
+    });
+
+    source.emit('progress', JSON.stringify(progressEventPayload));
+    source.emit('complete', JSON.stringify({ job_id: 'job_test', event_count: 1 }));
+    unsubscribe();
+
+    expect(progressEvents).toEqual([progressEventPayload]);
+    expect(completed).toBe(true);
+    expect(source.closeCount).toBe(1);
+  });
+
+  it('closes stream and reports Korean error for malformed progress JSON', () => {
+    const source = new FakeEventSource();
+    const errors: string[] = [];
+
+    streamProgressEvents('job_test', {
+      eventSourceFactory: () => source,
+      onError: (error) => errors.push(error.message)
+    });
+
+    source.emit('progress', '{bad json');
+
+    expect(errors).toEqual(['진행 상황을 해석하지 못했습니다.']);
+    expect(source.closeCount).toBe(1);
+  });
+
+  it('replays progress events into an array', async () => {
+    const source = new FakeEventSource();
+    const seen: string[] = [];
+    const promise = replayProgressEvents('job_test', {
+      eventSourceFactory: () => source,
+      onProgress: (event) => seen.push(event.message)
+    });
+
+    source.emit('progress', JSON.stringify(progressEventPayload));
+    source.emit('complete', JSON.stringify({ job_id: 'job_test', event_count: 1 }));
+
+    await expect(promise).resolves.toEqual([progressEventPayload]);
+    expect(seen).toEqual(['작업을 시작했습니다.']);
+    expect(source.closeCount).toBe(1);
+  });
+
+  it('fetches progress events and skips malformed event records', async () => {
+    const fetcher = async (url: string): Promise<Response> => {
+      expect(url).toBe('/jobs/job_test/progress-events');
+      return Response.json({
+        job_id: 'job_test',
+        events: [progressEventPayload, { event_id: 42, message: 'bad', status: 'BAD', sequence: 1 }]
+      });
+    };
+
+    await expect(getProgressEvents('job_test', '', fetcher)).resolves.toEqual([progressEventPayload]);
   });
 
   it('throws Korean messages for patch and render failures', async () => {
