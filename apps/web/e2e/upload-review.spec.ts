@@ -45,6 +45,13 @@ test('uploads fixture images and renders approved preview', async ({ page }) => 
   await page.route('**/jobs/job_e2e/run', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
+      body: JSON.stringify({ job_id: 'job_e2e', status: 'RUNNING', revision_attempts: 0 })
+    });
+  });
+
+  await page.route('**/jobs/job_e2e', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
       body: JSON.stringify({ job_id: 'job_e2e', status: 'APPROVED', revision_attempts: 1 })
     });
   });
@@ -57,7 +64,7 @@ test('uploads fixture images and renders approved preview', async ({ page }) => 
         'event: progress\n' +
         'data: {"event_id":"evt_0000","job_id":"job_e2e","sequence":0,"phase":"analysis","status":"CREATED","message":"작업을 시작했습니다.","attempt":0,"max_attempts":2,"scores":null,"next_action":"continue","created_at":"2026-06-23T00:00:00Z"}\n\n' +
         'event: complete\n' +
-        'data: {"job_id":"job_e2e","event_count":1}\n\n'
+        'data: {"job_id":"job_e2e","status":"APPROVED","event_count":1}\n\n'
     });
   });
 

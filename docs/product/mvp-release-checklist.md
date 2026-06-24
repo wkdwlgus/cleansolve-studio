@@ -1,6 +1,6 @@
 # MVP Release Checklist
 
-> 이 문서는 CleanSolve Studio의 현재 MVP 상태를 SoT 성공 기준에 맞춰 판단하기 위한 release checklist다. M9 기준 판정은 `Partial MVP`이며, 상용 production ready 판정이 아니다.
+> 이 문서는 CleanSolve Studio의 현재 MVP 상태를 SoT 성공 기준에 맞춰 판단하기 위한 release checklist다. M10 기준 판정은 `Partial MVP`이며, 상용 production ready 판정이 아니다.
 
 ## 판정 기준
 
@@ -64,7 +64,7 @@ npx --prefix apps/web playwright install chromium
 - PNG export artifact 생성과 download
 - web upload-to-preview smoke flow
 - review item budget과 E2E artifact metric 측정
-- 저장된 progress event의 SSE replay와 web progress timeline 표시
+- 저장된 progress event의 SSE replay, live SSE, web progress timeline 표시
 
 아직 production ready로 보지 않는 이유:
 
@@ -72,7 +72,7 @@ npx --prefix apps/web playwright install chromium
 - 시스템 내장 손글씨 스타일 계약과 기본 renderer 규칙은 있으나, 실제 이쁜 손글씨 reference corpus 기반 dataset 평가와 style similarity gate가 부족하다.
 - 한글/수식/도형 주석이 한 사람의 손글씨처럼 보이는지 측정하는 style similarity gate가 없다.
 - ReAct review/correction contract와 mock eval gate는 있으나 실제 GPT-5.5 planner와 실제 eval model은 없다.
-- 저장된 progress event replay UI는 있으나, 긴 AI 분석/보정 loop 실행 중 live SSE는 아직 없다.
+- live SSE는 구현됐지만, 외부 queue와 process crash 후 자동 재개는 MVP 이후 운영 hardening 범위다.
 - PDF export가 없다.
 - 상용 품질 raster compositing 검증이 없다.
 - browser full export flow와 visual snapshot regression이 없다.
@@ -80,7 +80,7 @@ npx --prefix apps/web playwright install chromium
 
 ## 남은 gap
 
-- Background job과 live SSE
+- Background job의 외부 queue 전환과 crash recovery hardening
 - 실제 GPT-5.5 기반 ReAct planner 연결
 - content/layout/style/visual diff score 기반 eval gate
 - 실제 OpenAI adapter 결과에 대한 dataset evaluation
@@ -91,11 +91,10 @@ npx --prefix apps/web playwright install chromium
 
 ## MVP Release Candidate까지 남은 고정 작업
 
-M9 이후 MVP release candidate까지는 다음 5개 마일스톤을 고정한다.
+M10 이후 MVP release candidate까지는 다음 4개 마일스톤을 고정한다.
 
 | 마일스톤 | 상태 | 해결하는 gap |
 | --- | --- | --- |
-| M10 Background Job & Live SSE | Planned | 실행 중 live progress, refresh/reconnect replay, 실패 stream contract |
 | M11 Real Planner & Eval Gate Integration | Planned | 실제 GPT-5.5 planner, 실제 eval model, safe HITL 전환 |
 | M12 Dataset Evaluation & Source Alignment | Planned | 여러 실제 샘플 기준 품질 측정, crop/matching/source alignment 평가 |
 | M13 Export Quality & Visual Regression | Planned | browser full export flow, PNG/PDF/compositing 품질, visual regression |

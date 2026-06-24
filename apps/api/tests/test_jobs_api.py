@@ -31,6 +31,22 @@ def upload_required_images(client: TestClient, job_id: str):
     )
 
 
+def use_inline_job_executor(monkeypatch):
+    class InlineExecutor:
+        def submit(self, request):
+            jobs.run_job_worker(
+                request,
+                store=jobs._store(),
+                live_progress_store=jobs._live_progress_store(),
+                openai_api_key=jobs.settings.openai_api_key,
+            )
+
+        def is_active(self, job_id):
+            return False
+
+    monkeypatch.setattr(jobs, "job_run_executor", InlineExecutor())
+
+
 def assert_error(response, code: str):
     payload = response.json()
     assert payload["detail"]["code"] == code
@@ -67,21 +83,37 @@ def test_create_job_initializes_manifest_backed_response():
     assert (jobs.settings.storage_root / payload["job_id"] / "manifest.json").exists()
 
 
-def test_create_job_and_run_mock_workflow_after_required_images_uploaded():
+def test_create_job_and_run_mock_workflow_after_required_images_uploaded(monkeypatch):
+    class CapturingExecutor:
+        def __init__(self):
+            self.requests = []
+
+        def submit(self, request):
+            self.requests.append(request)
+
+        def is_active(self, job_id):
+            return any(request.job_id == job_id for request in self.requests)
+
+    executor = CapturingExecutor()
+    monkeypatch.setattr(jobs, "job_run_executor", executor)
     client = TestClient(app)
 
     create_response = client.post("/jobs")
     job_id = create_response.json()["job_id"]
     upload_required_images(client, job_id)
     run_response = client.post(f"/jobs/{job_id}/run")
+    job_payload = client.get(f"/jobs/{job_id}").json()
 
     assert create_response.status_code == 201
-    assert run_response.status_code == 200
-    assert run_response.json()["status"] == "APPROVED"
-    assert run_response.json()["revision_attempts"] == 1
+    assert run_response.status_code == 202
+    assert run_response.json()["status"] == "RUNNING"
+    assert job_payload["status"] == "RUNNING"
+    assert len(executor.requests) == 1
+    assert executor.requests[0].job_id == job_id
 
 
 def test_run_with_openai_without_key_returns_502_and_marks_job_failed(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     monkeypatch.setattr(jobs.settings, "analysis_client", "openai")
     monkeypatch.setattr(jobs.settings, "openai_api_key", None)
     client = TestClient(app)
@@ -92,35 +124,33 @@ def test_run_with_openai_without_key_returns_502_and_marks_job_failed(monkeypatc
     job_response_payload = client.get(f"/jobs/{job_id}").json()
     review_items_payload = client.get(f"/jobs/{job_id}/review-items").json()
 
-    assert response.status_code == 502
-    assert_error(response, "ANALYSIS_ADAPTER_FAILED")
-    assert response.json()["detail"]["fields"] == {
-        "client": "openai",
-        "reason": "configuration_error",
-    }
+    assert response.status_code == 202
+    assert response.json()["status"] == "RUNNING"
     assert job_response_payload["status"] == "FAILED"
     assert job_response_payload["review_items"][-1]["type"] == "analysis_adapter_failed"
     assert job_response_payload["review_items"][-1]["retryable"] is True
     assert review_items_payload == {"items": []}
-    assert job_response_payload["analysis_artifacts"] == {
-        "candidate_spec": [],
-        "validation_report": [],
-        "correction_plan": [],
-        "review_correction": [],
-        "progress_events": [],
-    }
+    assert job_response_payload["analysis_artifacts"]["candidate_spec"] == []
+    assert job_response_payload["analysis_artifacts"]["validation_report"] == []
+    assert job_response_payload["analysis_artifacts"]["correction_plan"] == []
+    assert job_response_payload["analysis_artifacts"]["review_correction"] == []
+    assert len(job_response_payload["analysis_artifacts"]["progress_events"]) == 1
     assert job_response_payload["latest_analysis_artifact_ids"] == {
         "candidate_spec": None,
         "validation_report": None,
         "correction_plan": None,
         "review_correction": None,
-        "progress_events": None,
+        "progress_events": job_response_payload["analysis_artifacts"]["progress_events"][0]["artifact_id"],
     }
-    assert "jobs" not in str(response.json())
-    assert "sk-" not in str(response.json())
+    progress_payload = client.get(f"/jobs/{job_id}/progress-events").json()
+    assert progress_payload["events"][-1]["status"] == "FAILED"
+    assert "jobs" not in str(job_response_payload)
+    assert "sk-" not in str(job_response_payload)
+    assert "sk-" not in str(progress_payload)
 
 
 def test_run_with_openai_sdk_failure_returns_502_without_analysis_artifacts(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     class FailingResponses:
         def create(self, **kwargs):
             raise RuntimeError("401 sk-secret /private/tmp/problem.png")
@@ -145,32 +175,90 @@ def test_run_with_openai_sdk_failure_returns_502_without_analysis_artifacts(monk
     job_response_payload = client.get(f"/jobs/{job_id}").json()
     review_items_payload = client.get(f"/jobs/{job_id}/review-items").json()
 
-    assert response.status_code == 502
-    assert_error(response, "ANALYSIS_ADAPTER_FAILED")
-    assert response.json()["detail"]["fields"] == {
-        "client": "openai",
-        "reason": "response_error",
-    }
+    assert response.status_code == 202
+    assert response.json()["status"] == "RUNNING"
     assert job_response_payload["status"] == "FAILED"
     assert job_response_payload["review_items"][-1]["type"] == "analysis_adapter_failed"
     assert job_response_payload["review_items"][-1]["retryable"] is True
     assert review_items_payload == {"items": []}
-    assert job_response_payload["analysis_artifacts"] == {
-        "candidate_spec": [],
-        "validation_report": [],
-        "correction_plan": [],
-        "review_correction": [],
-        "progress_events": [],
-    }
+    assert job_response_payload["analysis_artifacts"]["candidate_spec"] == []
+    assert job_response_payload["analysis_artifacts"]["validation_report"] == []
+    assert job_response_payload["analysis_artifacts"]["correction_plan"] == []
+    assert job_response_payload["analysis_artifacts"]["review_correction"] == []
+    assert len(job_response_payload["analysis_artifacts"]["progress_events"]) == 1
     assert job_response_payload["latest_analysis_artifact_ids"] == {
         "candidate_spec": None,
         "validation_report": None,
         "correction_plan": None,
         "review_correction": None,
-        "progress_events": None,
+        "progress_events": job_response_payload["analysis_artifacts"]["progress_events"][0]["artifact_id"],
     }
+    progress_payload = client.get(f"/jobs/{job_id}/progress-events").json()
+    assert progress_payload["events"][-1]["status"] == "FAILED"
+    assert "sk-" not in str(job_response_payload)
+    assert "private" not in str(job_response_payload)
+    assert "sk-" not in str(progress_payload)
+    assert "private" not in str(progress_payload)
+
+
+def test_run_with_unexpected_workflow_failure_marks_job_failed_without_leaking(monkeypatch):
+    class FailingExecutor:
+        def submit(self, request):
+            raise RuntimeError("sk-secret /private/problem.png")
+
+        def is_active(self, job_id):
+            return False
+
+    monkeypatch.setattr(jobs, "job_run_executor", FailingExecutor())
+    client = TestClient(app, raise_server_exceptions=False)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    response = client.post(f"/jobs/{job_id}/run")
+    job_response_payload = client.get(f"/jobs/{job_id}").json()
+
+    assert response.status_code == 503
+    assert_error(response, "JOB_RUN_SUBMIT_FAILED")
+    assert job_response_payload["status"] == "FAILED"
+    assert job_response_payload["review_items"][-1]["safe_reason"] == "internal_error"
     assert "sk-" not in str(response.json())
     assert "private" not in str(response.json())
+    assert "sk-" not in str(job_response_payload)
+    assert "private" not in str(job_response_payload)
+
+
+def test_run_with_live_progress_initialize_failure_returns_storage_error(monkeypatch):
+    class FailingLiveProgressStore:
+        def initialize(self, job_id, source_image_artifact_ids):
+            raise OSError("disk /private/tmp/jobs failed")
+
+    class CapturingExecutor:
+        def __init__(self):
+            self.requests = []
+
+        def submit(self, request):
+            self.requests.append(request)
+
+        def is_active(self, job_id):
+            return False
+
+    executor = CapturingExecutor()
+    monkeypatch.setattr(jobs, "job_run_executor", executor)
+    monkeypatch.setattr(jobs, "_live_progress_store", lambda: FailingLiveProgressStore())
+    client = TestClient(app, raise_server_exceptions=False)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    response = client.post(f"/jobs/{job_id}/run")
+    job_response_payload = client.get(f"/jobs/{job_id}").json()
+
+    assert response.status_code == 500
+    assert_error(response, "STORAGE_WRITE_FAILED")
+    assert executor.requests == []
+    assert job_response_payload["status"] == "FAILED"
+    assert job_response_payload["review_items"][-1]["safe_reason"] == "progress_write_failed"
+    assert "private" not in str(response.json())
+    assert "disk" not in str(response.json())
 
 
 def test_run_requires_required_images_with_structured_error():
@@ -186,7 +274,29 @@ def test_run_requires_required_images_with_structured_error():
     }
 
 
-def test_review_items_endpoint_hides_internal_needs_review_items():
+def test_run_rejects_duplicate_running_job(monkeypatch):
+    class CapturingExecutor:
+        def submit(self, request):
+            return None
+
+        def is_active(self, job_id):
+            return True
+
+    monkeypatch.setattr(jobs, "job_run_executor", CapturingExecutor())
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    first = client.post(f"/jobs/{job_id}/run")
+    second = client.post(f"/jobs/{job_id}/run")
+
+    assert first.status_code == 202
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "JOB_ALREADY_RUNNING"
+
+
+def test_review_items_endpoint_hides_internal_needs_review_items(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
 
     job_id = client.post("/jobs").json()["job_id"]
@@ -198,7 +308,8 @@ def test_review_items_endpoint_hides_internal_needs_review_items():
     assert response.json()["items"] == []
 
 
-def test_run_job_persists_review_correction_and_progress_events():
+def test_run_job_persists_review_correction_and_progress_events(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job = client.post("/jobs").json()
     job_id = job["job_id"]
@@ -206,8 +317,9 @@ def test_run_job_persists_review_correction_and_progress_events():
 
     response = client.post(f"/jobs/{job_id}/run")
 
-    assert response.status_code == 200
-    payload = response.json()
+    assert response.status_code == 202
+    payload = client.get(f"/jobs/{job_id}").json()
+    assert payload["status"] == "APPROVED"
     assert payload["latest_analysis_artifact_ids"]["review_correction"].startswith("review_")
     assert payload["latest_analysis_artifact_ids"]["progress_events"].startswith("events_")
 
@@ -239,6 +351,7 @@ def test_progress_events_endpoint_returns_404_before_run():
 
 
 def test_progress_stream_replays_saved_progress_events_as_sse(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     monkeypatch.setattr(jobs.settings, "analysis_client", "mock")
     client = TestClient(app)
     job = client.post("/jobs").json()
@@ -248,7 +361,7 @@ def test_progress_stream_replays_saved_progress_events_as_sse(monkeypatch):
 
     response = client.get(f"/jobs/{job_id}/progress-stream")
 
-    assert run_response.status_code == 200
+    assert run_response.status_code == 202
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.headers["cache-control"] == "no-cache"
@@ -261,6 +374,65 @@ def test_progress_stream_replays_saved_progress_events_as_sse(monkeypatch):
     assert "event: complete\n" in body
     assert '"event_count":' in body
     assert "source_image_paths" not in body
+
+
+def test_progress_stream_reads_live_events_with_cursor(monkeypatch):
+    monkeypatch.setattr(jobs.settings, "analysis_client", "mock")
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+    store = LocalArtifactStore(jobs.settings.storage_root)
+    manifest = store.get_job(job_id)
+    ids = {
+        "problem": manifest.latest_image_artifact_ids["problem"],
+        "teacher_solution": manifest.latest_image_artifact_ids["teacher_solution"],
+    }
+    store.start_analysis_run(job_id, source_image_artifact_ids=ids)
+    live_store = jobs._live_progress_store()
+    live_store.initialize(job_id, ids)
+    live_store.append(
+        job_id,
+        jobs.ProgressEvent(
+            event_id="evt_0000",
+            job_id=job_id,
+            sequence=0,
+            phase="analysis",
+            status="CREATED",
+            message="작업을 시작했습니다.",
+            attempt=0,
+            max_attempts=2,
+            scores=None,
+            next_action="continue",
+            created_at="2026-06-23T00:00:00Z",
+        ),
+    )
+    live_store.append(
+        job_id,
+        jobs.ProgressEvent(
+            event_id="evt_0001",
+            job_id=job_id,
+            sequence=1,
+            phase="analysis",
+            status="SPEC_EXTRACTED",
+            message="원본 문제와 선생님 손풀이를 분석하고 있습니다.",
+            attempt=0,
+            max_attempts=2,
+            scores=None,
+            next_action="continue",
+            created_at="2026-06-23T00:00:01Z",
+        ),
+    )
+    manifest = store.get_job(job_id)
+    manifest.status = "APPROVED"
+    store.save_manifest(manifest)
+
+    response = client.get(f"/jobs/{job_id}/progress-stream?after=evt_0000")
+
+    assert response.status_code == 200
+    assert "id: evt_0000" not in response.text
+    assert "id: evt_0001" in response.text
+    assert "event: progress" in response.text
+    assert "event: complete" in response.text
 
 
 def test_progress_stream_returns_404_before_run():
@@ -498,6 +670,9 @@ def test_settings_default_to_mock_analysis_client(monkeypatch):
     assert settings.openai_model_image == "gpt-image-2"
     assert settings.openai_analysis_image_detail == "auto"
     assert settings.openai_analysis_timeout_seconds == 60
+    assert settings.background_max_workers == 1
+    assert settings.progress_poll_interval_ms == 250
+    assert settings.progress_heartbeat_seconds == 15
 
 
 def test_settings_reject_invalid_analysis_client(monkeypatch):
@@ -521,6 +696,36 @@ def test_settings_reject_non_positive_openai_timeout(monkeypatch):
         Settings()
 
 
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "CLEANSOLVE_BACKGROUND_MAX_WORKERS",
+        "CLEANSOLVE_PROGRESS_POLL_INTERVAL_MS",
+        "CLEANSOLVE_PROGRESS_HEARTBEAT_SECONDS",
+    ],
+)
+def test_settings_reject_non_integer_background_progress_values(monkeypatch, env_name):
+    monkeypatch.setenv(env_name, "abc")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+@pytest.mark.parametrize(
+    "env_name",
+    [
+        "CLEANSOLVE_BACKGROUND_MAX_WORKERS",
+        "CLEANSOLVE_PROGRESS_POLL_INTERVAL_MS",
+        "CLEANSOLVE_PROGRESS_HEARTBEAT_SECONDS",
+    ],
+)
+def test_settings_reject_non_positive_background_progress_values(monkeypatch, env_name):
+    monkeypatch.setenv(env_name, "0")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_manifest_store_rejects_invalid_workflow_status(tmp_path):
     store = LocalArtifactStore(tmp_path / "jobs")
     manifest = store.create_job()
@@ -534,6 +739,186 @@ def test_manifest_store_rejects_invalid_workflow_status(tmp_path):
         )
 
     assert store.get_job(manifest.job_id).status == "CREATED"
+
+
+def test_store_start_analysis_run_marks_job_running(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    store.save_manifest(manifest)
+
+    updated = store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids=ids,
+    )
+
+    assert updated.status == "RUNNING"
+    assert updated.latest_analysis_artifact_ids["candidate_spec"] is None
+    assert updated.latest_analysis_artifact_ids["progress_events"] is None
+
+
+def test_store_start_analysis_run_rejects_terminal_job(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    manifest.status = "APPROVED"
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.start_analysis_run(
+            manifest.job_id,
+            source_image_artifact_ids=ids,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "JOB_RUN_NOT_RESTARTABLE"
+    assert exc_info.value.detail["fields"] == {
+        "job_id": manifest.job_id,
+        "status": "APPROVED",
+    }
+
+
+def test_store_start_analysis_run_rejects_running_job(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    manifest.status = "RUNNING"
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.start_analysis_run(
+            manifest.job_id,
+            source_image_artifact_ids=ids,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "JOB_ALREADY_RUNNING"
+    assert exc_info.value.detail["fields"] == {"job_id": manifest.job_id}
+
+
+def test_store_save_failed_background_run_persists_only_safe_progress_events(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    manifest.status = "RUNNING"
+    store.save_manifest(manifest)
+    failed_event = {
+        "event_id": "evt_0000",
+        "job_id": manifest.job_id,
+        "sequence": 0,
+        "phase": "failed",
+        "status": "FAILED",
+        "message": "작업이 실패했습니다.",
+        "attempt": 0,
+        "max_attempts": 2,
+        "scores": None,
+        "next_action": "fail",
+        "created_at": "2026-06-23T00:00:00Z",
+    }
+
+    updated = store.save_failed_background_run(
+        manifest.job_id,
+        reason="configuration_error",
+        review_item={
+            "type": "analysis_adapter_failed",
+            "client": "openai",
+            "retryable": True,
+            "review_reason": None,
+            "safe_reason": "configuration_error",
+        },
+        progress_events_payload={
+            "job_id": manifest.job_id,
+            "events": [failed_event],
+        },
+        source_image_artifact_ids=ids,
+    )
+
+    assert updated.status == "FAILED"
+    assert updated.review_items[-1]["safe_reason"] == "configuration_error"
+    assert updated.latest_analysis_artifact_ids["candidate_spec"] is None
+    assert updated.latest_analysis_artifact_ids["validation_report"] is None
+    assert updated.latest_analysis_artifact_ids["correction_plan"] is None
+    assert updated.latest_analysis_artifact_ids["review_correction"] is None
+    assert updated.latest_analysis_artifact_ids["progress_events"].startswith("events_")
+    payload = store.read_latest_analysis_payload(manifest.job_id, "progress_events")
+    assert payload == {"job_id": manifest.job_id, "events": [failed_event]}
+
+
+def test_store_save_failed_background_run_persists_only_safe_review_item_fields(tmp_path):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    manifest.status = "RUNNING"
+    store.save_manifest(manifest)
+
+    updated = store.save_failed_background_run(
+        manifest.job_id,
+        reason="sk-secret /private/problem.png",
+        review_item={
+            "type": "analysis_adapter_failed",
+            "client": "openai",
+            "retryable": True,
+            "review_reason": "/private/path",
+            "safe_reason": "caller_reason",
+            "exception_message": "raw exception",
+            "local_path": "/tmp/private/input.png",
+            "prompt": "raw prompt",
+            "api_key": "sk-secret",
+            "source_image_paths": {"problem": "/tmp/private/problem.png"},
+            "raw_model_output": "raw model output",
+        },
+        progress_events_payload={"job_id": manifest.job_id, "events": []},
+        source_image_artifact_ids=ids,
+    )
+
+    assert updated.review_items[-1] == {
+        "type": "analysis_adapter_failed",
+        "client": "openai",
+        "retryable": True,
+        "review_reason": None,
+        "safe_reason": "internal_error",
+    }
+    assert "sk-" not in str(updated.model_dump(mode="json"))
+    assert "/private" not in str(updated.model_dump(mode="json"))
+    assert "raw prompt" not in str(updated.model_dump(mode="json"))
+    assert "raw model output" not in str(updated.model_dump(mode="json"))
+
+
+@pytest.mark.parametrize("status_value", ["CREATED", "APPROVED"])
+def test_store_save_failed_background_run_rejects_non_running_job(tmp_path, status_value):
+    store = LocalArtifactStore(tmp_path / "jobs")
+    manifest = store.create_job()
+    ids = source_ids()
+    manifest.latest_image_artifact_ids = ids
+    manifest.status = status_value
+    store.save_manifest(manifest)
+
+    with pytest.raises(HTTPException) as exc_info:
+        store.save_failed_background_run(
+            manifest.job_id,
+            reason="configuration_error",
+            review_item={
+                "type": "analysis_adapter_failed",
+                "client": "openai",
+                "retryable": True,
+                "review_reason": None,
+            },
+            progress_events_payload={"job_id": manifest.job_id, "events": []},
+            source_image_artifact_ids=ids,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "JOB_RUN_NOT_RESTARTABLE"
+    assert exc_info.value.detail["fields"] == {
+        "job_id": manifest.job_id,
+        "status": status_value,
+    }
+    assert store.get_job(manifest.job_id).status == status_value
 
 
 def test_old_manifest_json_defaults_analysis_artifact_fields(tmp_path):
@@ -660,6 +1045,10 @@ def test_store_saves_analysis_outputs_and_updates_manifest(tmp_path):
     }
     manifest.latest_image_artifact_ids = source_ids
     store.save_manifest(manifest)
+    store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids=source_ids,
+    )
 
     updated = store.save_analysis_outputs(
         job_id=manifest.job_id,
@@ -711,6 +1100,10 @@ def test_read_latest_analysis_payload_rejects_path_escape_from_corrupt_manifest(
     ids = source_ids()
     manifest.latest_image_artifact_ids = ids
     store.save_manifest(manifest)
+    store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids=ids,
+    )
 
     updated = store.save_analysis_outputs(
         job_id=manifest.job_id,
@@ -761,6 +1154,10 @@ def test_read_latest_analysis_payload_rejects_symlink_escape_from_corrupt_manife
     ids = source_ids()
     manifest.latest_image_artifact_ids = ids
     store.save_manifest(manifest)
+    store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids=ids,
+    )
 
     updated = store.save_analysis_outputs(
         job_id=manifest.job_id,
@@ -814,6 +1211,10 @@ def test_store_saves_spec_patch_outputs_without_replacing_correction_plan(tmp_pa
     }
     manifest.latest_image_artifact_ids = source_ids
     store.save_manifest(manifest)
+    store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids=source_ids,
+    )
     initial = store.save_analysis_outputs(
         job_id=manifest.job_id,
         status_value="APPROVED",
@@ -1150,6 +1551,13 @@ def test_store_rejects_analysis_outputs_when_latest_inputs_changed(tmp_path):
         "teacher_solution": "img_teacher_new",
     }
     store.save_manifest(manifest)
+    store.start_analysis_run(
+        manifest.job_id,
+        source_image_artifact_ids={
+            "problem": "img_problem_new",
+            "teacher_solution": "img_teacher_new",
+        },
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         store.save_analysis_outputs(
@@ -1198,7 +1606,8 @@ def test_analysis_artifact_routes_return_structured_404_before_run():
         }
 
 
-def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads():
+def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1206,9 +1615,11 @@ def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads():
     job_before_run = client.get(f"/jobs/{job_id}").json()
     expected_source_ids = job_before_run["latest_image_artifact_ids"]
     run_response = client.post(f"/jobs/{job_id}/run")
-    run_payload = run_response.json()
+    run_payload = client.get(f"/jobs/{job_id}").json()
 
-    assert run_response.status_code == 200
+    assert run_response.status_code == 202
+    assert run_response.json()["status"] == "RUNNING"
+    assert run_payload["status"] == "APPROVED"
     assert set(run_payload["analysis_artifacts"]) == {
         "candidate_spec",
         "validation_report",
@@ -1245,11 +1656,13 @@ def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads():
     assert isinstance(correction_response.json()["correction_plans"], list)
 
 
-def test_patch_spec_route_applies_allowed_change_and_appends_artifacts():
+def test_patch_spec_route_applies_allowed_change_and_appends_artifacts(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
-    run_payload = client.post(f"/jobs/{job_id}/run").json()
+    run_response = client.post(f"/jobs/{job_id}/run")
+    run_payload = client.get(f"/jobs/{job_id}").json()
     original_spec_id = run_payload["latest_analysis_artifact_ids"]["candidate_spec"]
     original_report_id = run_payload["latest_analysis_artifact_ids"]["validation_report"]
 
@@ -1263,6 +1676,7 @@ def test_patch_spec_route_applies_allowed_change_and_appends_artifacts():
         },
     )
 
+    assert run_response.status_code == 202
     assert response.status_code == 200
     payload = response.json()
     patched_element = next(
@@ -1284,7 +1698,8 @@ def test_patch_spec_route_applies_allowed_change_and_appends_artifacts():
     assert len(artifacts["correction_plan"]) == 1
 
 
-def test_patch_spec_route_rejects_stale_client_version():
+def test_patch_spec_route_rejects_stale_client_version(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1303,7 +1718,8 @@ def test_patch_spec_route_rejects_stale_client_version():
     assert response.status_code == 422
 
 
-def test_patch_spec_route_reports_version_conflict_without_changing_latest_spec():
+def test_patch_spec_route_reports_version_conflict_without_changing_latest_spec(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1339,7 +1755,8 @@ def test_patch_spec_route_reports_version_conflict_without_changing_latest_spec(
     assert client.get(f"/jobs/{job_id}/candidate-spec").json() == latest_before_conflict
 
 
-def test_patch_spec_route_rejects_disallowed_path_without_changing_latest_spec():
+def test_patch_spec_route_rejects_disallowed_path_without_changing_latest_spec(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1380,7 +1797,8 @@ def test_patch_spec_route_returns_spec_not_ready_before_run():
     assert_error(response, "SPEC_NOT_READY")
 
 
-def test_render_route_saves_svg_artifact_and_rendered_preview_returns_latest():
+def test_render_route_saves_svg_artifact_and_rendered_preview_returns_latest(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1413,7 +1831,9 @@ def test_rendered_preview_route_returns_404_before_render():
 def run_and_render_job(client: TestClient) -> tuple[str, dict[str, object], dict[str, object]]:
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
-    run_payload = client.post(f"/jobs/{job_id}/run").json()
+    run_response = client.post(f"/jobs/{job_id}/run")
+    assert run_response.status_code == 202
+    run_payload = client.get(f"/jobs/{job_id}").json()
     render_payload = client.post(f"/jobs/{job_id}/render").json()
     return job_id, run_payload, render_payload
 
@@ -1428,7 +1848,8 @@ def test_export_route_requires_approved_job():
     assert_error(response, "EXPORT_JOB_NOT_READY")
 
 
-def test_export_route_requires_latest_render_artifact():
+def test_export_route_requires_latest_render_artifact(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1440,7 +1861,8 @@ def test_export_route_requires_latest_render_artifact():
     assert_error(response, "EXPORT_RENDER_NOT_READY")
 
 
-def test_export_route_rejects_unsupported_format():
+def test_export_route_rejects_unsupported_format(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id, _, _ = run_and_render_job(client)
 
@@ -1454,7 +1876,8 @@ def test_export_route_rejects_unsupported_format():
     }
 
 
-def test_export_route_saves_png_artifact_and_downloads_it():
+def test_export_route_saves_png_artifact_and_downloads_it(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id, run_payload, render_payload = run_and_render_job(client)
 
@@ -1489,7 +1912,8 @@ def test_export_route_saves_png_artifact_and_downloads_it():
     assert download_response.content.startswith(b"\x89PNG\r\n\x1a\n")
 
 
-def test_latest_export_route_returns_404_before_export():
+def test_latest_export_route_returns_404_before_export(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id, _, _ = run_and_render_job(client)
 
@@ -1499,7 +1923,8 @@ def test_latest_export_route_returns_404_before_export():
     assert_error(response, "EXPORT_ARTIFACT_NOT_FOUND")
 
 
-def test_export_download_returns_404_for_unknown_export_id():
+def test_export_download_returns_404_for_unknown_export_id(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id, _, _ = run_and_render_job(client)
 
@@ -1509,7 +1934,8 @@ def test_export_download_returns_404_for_unknown_export_id():
     assert_error(response, "EXPORT_ARTIFACT_NOT_FOUND")
 
 
-def test_export_route_rejects_stale_render_candidate_spec():
+def test_export_route_rejects_stale_render_candidate_spec(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id, _, _ = run_and_render_job(client)
     patch_response = client.patch(

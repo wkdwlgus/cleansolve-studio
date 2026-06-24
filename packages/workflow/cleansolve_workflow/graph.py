@@ -76,6 +76,7 @@ def run_mock_workflow(
     max_revision_attempts: int = 2,
     candidate_spec_override=None,
     correction_patch_override: dict[str, object] | None = None,
+    progress_event_sink=None,
 ) -> WorkflowState:
     app = build_graph()
     initial_state = {
@@ -108,6 +109,8 @@ def run_mock_workflow(
         initial_state["source_image_paths"] = source_image_paths
     if analysis_client_override is not None:
         initial_state["analysis_client_override"] = analysis_client_override
+    if progress_event_sink is not None:
+        initial_state["progress_event_sink"] = progress_event_sink
 
     return app.invoke(initial_state)
 

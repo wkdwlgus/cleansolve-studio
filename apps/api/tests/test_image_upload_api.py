@@ -418,7 +418,19 @@ def test_run_requires_both_problem_and_teacher_solution_images():
     }
 
 
-def test_run_succeeds_after_both_required_images_are_uploaded():
+def test_run_succeeds_after_both_required_images_are_uploaded(monkeypatch):
+    class CapturingExecutor:
+        def __init__(self):
+            self.requests = []
+
+        def submit(self, request):
+            self.requests.append(request)
+
+        def is_active(self, job_id):
+            return any(request.job_id == job_id for request in self.requests)
+
+    executor = CapturingExecutor()
+    monkeypatch.setattr(jobs, "job_run_executor", executor)
     client = TestClient(app)
     job_id = create_job(client)
     client.post(
@@ -432,6 +444,7 @@ def test_run_succeeds_after_both_required_images_are_uploaded():
 
     response = client.post(f"/jobs/{job_id}/run")
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "APPROVED"
-    assert response.json()["revision_attempts"] == 1
+    assert response.status_code == 202
+    assert response.json()["status"] == "RUNNING"
+    assert len(executor.requests) == 1
+    assert executor.requests[0].job_id == job_id

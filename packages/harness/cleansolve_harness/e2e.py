@@ -51,7 +51,11 @@ def run_api_upload_to_export_e2e(
         mime_type=_image_mime_type(teacher_solution_image_path),
     )
 
-    run_payload = _json_response(client.post(f"/jobs/{job_id}/run"), 200)
+    run_start_payload = _json_response(client.post(f"/jobs/{job_id}/run"), 202)
+    if _required_string(run_start_payload, "status") != "RUNNING":
+        raise AssertionError("run start response must be RUNNING")
+    _drain_progress_stream(client, job_id)
+    run_payload = _json_response(client.get(f"/jobs/{job_id}"), 200)
     status = _required_string(run_payload, "status")
     if status not in ALLOWED_RUN_STATUSES:
         raise AssertionError(f"Unexpected run status: {status}")
@@ -124,6 +128,18 @@ def run_api_upload_to_export_e2e(
         export_artifact_id=export_artifact_id,
         export_size_bytes=len(download_response.content),
     )
+
+
+def _drain_progress_stream(client: TestClient, job_id: str) -> str:
+    response = client.get(f"/jobs/{job_id}/progress-stream")
+    if response.status_code != 200:
+        raise AssertionError(
+            f"Expected progress stream status 200, got {response.status_code}: {response.text}"
+        )
+    body = response.text
+    if "event: complete" not in body:
+        raise AssertionError(f"Progress stream did not complete: {body}")
+    return body
 
 
 def _upload_image(
