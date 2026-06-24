@@ -94,7 +94,7 @@ ERROR_MESSAGES = {
     "EXPORT_RENDER_NOT_READY": "export할 render artifact가 최신 상태가 아닙니다.",
     "EXPORT_SOURCE_CHANGED": "export 생성 중 입력 artifact가 변경되었습니다.",
     "EXPORT_ARTIFACT_NOT_FOUND": "export artifact를 찾을 수 없습니다.",
-    "STORAGE_WRITE_FAILED": "이미지 artifact 저장에 실패했습니다.",
+    "STORAGE_WRITE_FAILED": "artifact 저장에 실패했습니다.",
 }
 
 
@@ -369,6 +369,10 @@ def job_run_submit_failed_error(job_id: str) -> HTTPException:
         status.HTTP_503_SERVICE_UNAVAILABLE,
         {"job_id": job_id},
     )
+
+
+def storage_write_failed_error() -> HTTPException:
+    return _error("STORAGE_WRITE_FAILED", status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def job_response(manifest: JobManifest) -> dict[str, Any]:

@@ -31,6 +31,22 @@ def upload_required_images(client: TestClient, job_id: str):
     )
 
 
+def use_inline_job_executor(monkeypatch):
+    class InlineExecutor:
+        def submit(self, request):
+            jobs.run_job_worker(
+                request,
+                store=jobs._store(),
+                live_progress_store=jobs._live_progress_store(),
+                openai_api_key=jobs.settings.openai_api_key,
+            )
+
+        def is_active(self, job_id):
+            return False
+
+    monkeypatch.setattr(jobs, "job_run_executor", InlineExecutor())
+
+
 def assert_error(response, code: str):
     payload = response.json()
     assert payload["detail"]["code"] == code
@@ -67,21 +83,37 @@ def test_create_job_initializes_manifest_backed_response():
     assert (jobs.settings.storage_root / payload["job_id"] / "manifest.json").exists()
 
 
-def test_create_job_and_run_mock_workflow_after_required_images_uploaded():
+def test_create_job_and_run_mock_workflow_after_required_images_uploaded(monkeypatch):
+    class CapturingExecutor:
+        def __init__(self):
+            self.requests = []
+
+        def submit(self, request):
+            self.requests.append(request)
+
+        def is_active(self, job_id):
+            return any(request.job_id == job_id for request in self.requests)
+
+    executor = CapturingExecutor()
+    monkeypatch.setattr(jobs, "job_run_executor", executor)
     client = TestClient(app)
 
     create_response = client.post("/jobs")
     job_id = create_response.json()["job_id"]
     upload_required_images(client, job_id)
     run_response = client.post(f"/jobs/{job_id}/run")
+    job_payload = client.get(f"/jobs/{job_id}").json()
 
     assert create_response.status_code == 201
-    assert run_response.status_code == 200
-    assert run_response.json()["status"] == "APPROVED"
-    assert run_response.json()["revision_attempts"] == 1
+    assert run_response.status_code == 202
+    assert run_response.json()["status"] == "RUNNING"
+    assert job_payload["status"] == "RUNNING"
+    assert len(executor.requests) == 1
+    assert executor.requests[0].job_id == job_id
 
 
 def test_run_with_openai_without_key_returns_502_and_marks_job_failed(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     monkeypatch.setattr(jobs.settings, "analysis_client", "openai")
     monkeypatch.setattr(jobs.settings, "openai_api_key", None)
     client = TestClient(app)
@@ -92,35 +124,33 @@ def test_run_with_openai_without_key_returns_502_and_marks_job_failed(monkeypatc
     job_response_payload = client.get(f"/jobs/{job_id}").json()
     review_items_payload = client.get(f"/jobs/{job_id}/review-items").json()
 
-    assert response.status_code == 502
-    assert_error(response, "ANALYSIS_ADAPTER_FAILED")
-    assert response.json()["detail"]["fields"] == {
-        "client": "openai",
-        "reason": "configuration_error",
-    }
+    assert response.status_code == 202
+    assert response.json()["status"] == "RUNNING"
     assert job_response_payload["status"] == "FAILED"
     assert job_response_payload["review_items"][-1]["type"] == "analysis_adapter_failed"
     assert job_response_payload["review_items"][-1]["retryable"] is True
     assert review_items_payload == {"items": []}
-    assert job_response_payload["analysis_artifacts"] == {
-        "candidate_spec": [],
-        "validation_report": [],
-        "correction_plan": [],
-        "review_correction": [],
-        "progress_events": [],
-    }
+    assert job_response_payload["analysis_artifacts"]["candidate_spec"] == []
+    assert job_response_payload["analysis_artifacts"]["validation_report"] == []
+    assert job_response_payload["analysis_artifacts"]["correction_plan"] == []
+    assert job_response_payload["analysis_artifacts"]["review_correction"] == []
+    assert len(job_response_payload["analysis_artifacts"]["progress_events"]) == 1
     assert job_response_payload["latest_analysis_artifact_ids"] == {
         "candidate_spec": None,
         "validation_report": None,
         "correction_plan": None,
         "review_correction": None,
-        "progress_events": None,
+        "progress_events": job_response_payload["analysis_artifacts"]["progress_events"][0]["artifact_id"],
     }
-    assert "jobs" not in str(response.json())
-    assert "sk-" not in str(response.json())
+    progress_payload = client.get(f"/jobs/{job_id}/progress-events").json()
+    assert progress_payload["events"][-1]["status"] == "FAILED"
+    assert "jobs" not in str(job_response_payload)
+    assert "sk-" not in str(job_response_payload)
+    assert "sk-" not in str(progress_payload)
 
 
 def test_run_with_openai_sdk_failure_returns_502_without_analysis_artifacts(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     class FailingResponses:
         def create(self, **kwargs):
             raise RuntimeError("401 sk-secret /private/tmp/problem.png")
@@ -145,39 +175,41 @@ def test_run_with_openai_sdk_failure_returns_502_without_analysis_artifacts(monk
     job_response_payload = client.get(f"/jobs/{job_id}").json()
     review_items_payload = client.get(f"/jobs/{job_id}/review-items").json()
 
-    assert response.status_code == 502
-    assert_error(response, "ANALYSIS_ADAPTER_FAILED")
-    assert response.json()["detail"]["fields"] == {
-        "client": "openai",
-        "reason": "response_error",
-    }
+    assert response.status_code == 202
+    assert response.json()["status"] == "RUNNING"
     assert job_response_payload["status"] == "FAILED"
     assert job_response_payload["review_items"][-1]["type"] == "analysis_adapter_failed"
     assert job_response_payload["review_items"][-1]["retryable"] is True
     assert review_items_payload == {"items": []}
-    assert job_response_payload["analysis_artifacts"] == {
-        "candidate_spec": [],
-        "validation_report": [],
-        "correction_plan": [],
-        "review_correction": [],
-        "progress_events": [],
-    }
+    assert job_response_payload["analysis_artifacts"]["candidate_spec"] == []
+    assert job_response_payload["analysis_artifacts"]["validation_report"] == []
+    assert job_response_payload["analysis_artifacts"]["correction_plan"] == []
+    assert job_response_payload["analysis_artifacts"]["review_correction"] == []
+    assert len(job_response_payload["analysis_artifacts"]["progress_events"]) == 1
     assert job_response_payload["latest_analysis_artifact_ids"] == {
         "candidate_spec": None,
         "validation_report": None,
         "correction_plan": None,
         "review_correction": None,
-        "progress_events": None,
+        "progress_events": job_response_payload["analysis_artifacts"]["progress_events"][0]["artifact_id"],
     }
-    assert "sk-" not in str(response.json())
-    assert "private" not in str(response.json())
+    progress_payload = client.get(f"/jobs/{job_id}/progress-events").json()
+    assert progress_payload["events"][-1]["status"] == "FAILED"
+    assert "sk-" not in str(job_response_payload)
+    assert "private" not in str(job_response_payload)
+    assert "sk-" not in str(progress_payload)
+    assert "private" not in str(progress_payload)
 
 
 def test_run_with_unexpected_workflow_failure_marks_job_failed_without_leaking(monkeypatch):
-    def fail_workflow(**_kwargs):
-        raise RuntimeError("sk-secret /private/problem.png")
+    class FailingExecutor:
+        def submit(self, request):
+            raise RuntimeError("sk-secret /private/problem.png")
 
-    monkeypatch.setattr(jobs, "run_mock_workflow", fail_workflow)
+        def is_active(self, job_id):
+            return False
+
+    monkeypatch.setattr(jobs, "job_run_executor", FailingExecutor())
     client = TestClient(app, raise_server_exceptions=False)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -185,18 +217,48 @@ def test_run_with_unexpected_workflow_failure_marks_job_failed_without_leaking(m
     response = client.post(f"/jobs/{job_id}/run")
     job_response_payload = client.get(f"/jobs/{job_id}").json()
 
-    assert response.status_code == 502
-    assert_error(response, "ANALYSIS_ADAPTER_FAILED")
-    assert response.json()["detail"]["fields"] == {
-        "client": "mock",
-        "reason": "internal_error",
-    }
+    assert response.status_code == 503
+    assert_error(response, "JOB_RUN_SUBMIT_FAILED")
     assert job_response_payload["status"] == "FAILED"
     assert job_response_payload["review_items"][-1]["safe_reason"] == "internal_error"
     assert "sk-" not in str(response.json())
     assert "private" not in str(response.json())
     assert "sk-" not in str(job_response_payload)
     assert "private" not in str(job_response_payload)
+
+
+def test_run_with_live_progress_initialize_failure_returns_storage_error(monkeypatch):
+    class FailingLiveProgressStore:
+        def initialize(self, job_id, source_image_artifact_ids):
+            raise OSError("disk /private/tmp/jobs failed")
+
+    class CapturingExecutor:
+        def __init__(self):
+            self.requests = []
+
+        def submit(self, request):
+            self.requests.append(request)
+
+        def is_active(self, job_id):
+            return False
+
+    executor = CapturingExecutor()
+    monkeypatch.setattr(jobs, "job_run_executor", executor)
+    monkeypatch.setattr(jobs, "_live_progress_store", lambda: FailingLiveProgressStore())
+    client = TestClient(app, raise_server_exceptions=False)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    response = client.post(f"/jobs/{job_id}/run")
+    job_response_payload = client.get(f"/jobs/{job_id}").json()
+
+    assert response.status_code == 500
+    assert_error(response, "STORAGE_WRITE_FAILED")
+    assert executor.requests == []
+    assert job_response_payload["status"] == "FAILED"
+    assert job_response_payload["review_items"][-1]["safe_reason"] == "progress_write_failed"
+    assert "private" not in str(response.json())
+    assert "disk" not in str(response.json())
 
 
 def test_run_requires_required_images_with_structured_error():
@@ -212,7 +274,29 @@ def test_run_requires_required_images_with_structured_error():
     }
 
 
-def test_review_items_endpoint_hides_internal_needs_review_items():
+def test_run_rejects_duplicate_running_job(monkeypatch):
+    class CapturingExecutor:
+        def submit(self, request):
+            return None
+
+        def is_active(self, job_id):
+            return True
+
+    monkeypatch.setattr(jobs, "job_run_executor", CapturingExecutor())
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    first = client.post(f"/jobs/{job_id}/run")
+    second = client.post(f"/jobs/{job_id}/run")
+
+    assert first.status_code == 202
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "JOB_ALREADY_RUNNING"
+
+
+def test_review_items_endpoint_hides_internal_needs_review_items(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
 
     job_id = client.post("/jobs").json()["job_id"]
@@ -224,7 +308,8 @@ def test_review_items_endpoint_hides_internal_needs_review_items():
     assert response.json()["items"] == []
 
 
-def test_run_job_persists_review_correction_and_progress_events():
+def test_run_job_persists_review_correction_and_progress_events(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job = client.post("/jobs").json()
     job_id = job["job_id"]
@@ -232,8 +317,9 @@ def test_run_job_persists_review_correction_and_progress_events():
 
     response = client.post(f"/jobs/{job_id}/run")
 
-    assert response.status_code == 200
-    payload = response.json()
+    assert response.status_code == 202
+    payload = client.get(f"/jobs/{job_id}").json()
+    assert payload["status"] == "APPROVED"
     assert payload["latest_analysis_artifact_ids"]["review_correction"].startswith("review_")
     assert payload["latest_analysis_artifact_ids"]["progress_events"].startswith("events_")
 
@@ -265,6 +351,7 @@ def test_progress_events_endpoint_returns_404_before_run():
 
 
 def test_progress_stream_replays_saved_progress_events_as_sse(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     monkeypatch.setattr(jobs.settings, "analysis_client", "mock")
     client = TestClient(app)
     job = client.post("/jobs").json()
@@ -274,7 +361,7 @@ def test_progress_stream_replays_saved_progress_events_as_sse(monkeypatch):
 
     response = client.get(f"/jobs/{job_id}/progress-stream")
 
-    assert run_response.status_code == 200
+    assert run_response.status_code == 202
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     assert response.headers["cache-control"] == "no-cache"
@@ -287,6 +374,65 @@ def test_progress_stream_replays_saved_progress_events_as_sse(monkeypatch):
     assert "event: complete\n" in body
     assert '"event_count":' in body
     assert "source_image_paths" not in body
+
+
+def test_progress_stream_reads_live_events_with_cursor(monkeypatch):
+    monkeypatch.setattr(jobs.settings, "analysis_client", "mock")
+    client = TestClient(app)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+    store = LocalArtifactStore(jobs.settings.storage_root)
+    manifest = store.get_job(job_id)
+    ids = {
+        "problem": manifest.latest_image_artifact_ids["problem"],
+        "teacher_solution": manifest.latest_image_artifact_ids["teacher_solution"],
+    }
+    store.start_analysis_run(job_id, source_image_artifact_ids=ids)
+    live_store = jobs._live_progress_store()
+    live_store.initialize(job_id, ids)
+    live_store.append(
+        job_id,
+        jobs.ProgressEvent(
+            event_id="evt_0000",
+            job_id=job_id,
+            sequence=0,
+            phase="analysis",
+            status="CREATED",
+            message="작업을 시작했습니다.",
+            attempt=0,
+            max_attempts=2,
+            scores=None,
+            next_action="continue",
+            created_at="2026-06-23T00:00:00Z",
+        ),
+    )
+    live_store.append(
+        job_id,
+        jobs.ProgressEvent(
+            event_id="evt_0001",
+            job_id=job_id,
+            sequence=1,
+            phase="analysis",
+            status="SPEC_EXTRACTED",
+            message="원본 문제와 선생님 손풀이를 분석하고 있습니다.",
+            attempt=0,
+            max_attempts=2,
+            scores=None,
+            next_action="continue",
+            created_at="2026-06-23T00:00:01Z",
+        ),
+    )
+    manifest = store.get_job(job_id)
+    manifest.status = "APPROVED"
+    store.save_manifest(manifest)
+
+    response = client.get(f"/jobs/{job_id}/progress-stream?after=evt_0000")
+
+    assert response.status_code == 200
+    assert "id: evt_0000" not in response.text
+    assert "id: evt_0001" in response.text
+    assert "event: progress" in response.text
+    assert "event: complete" in response.text
 
 
 def test_progress_stream_returns_404_before_run():
@@ -1460,7 +1606,8 @@ def test_analysis_artifact_routes_return_structured_404_before_run():
         }
 
 
-def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads():
+def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1468,9 +1615,11 @@ def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads():
     job_before_run = client.get(f"/jobs/{job_id}").json()
     expected_source_ids = job_before_run["latest_image_artifact_ids"]
     run_response = client.post(f"/jobs/{job_id}/run")
-    run_payload = run_response.json()
+    run_payload = client.get(f"/jobs/{job_id}").json()
 
-    assert run_response.status_code == 200
+    assert run_response.status_code == 202
+    assert run_response.json()["status"] == "RUNNING"
+    assert run_payload["status"] == "APPROVED"
     assert set(run_payload["analysis_artifacts"]) == {
         "candidate_spec",
         "validation_report",
@@ -1507,11 +1656,13 @@ def test_run_persists_analysis_artifacts_and_routes_return_latest_payloads():
     assert isinstance(correction_response.json()["correction_plans"], list)
 
 
-def test_patch_spec_route_applies_allowed_change_and_appends_artifacts():
+def test_patch_spec_route_applies_allowed_change_and_appends_artifacts(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
-    run_payload = client.post(f"/jobs/{job_id}/run").json()
+    run_response = client.post(f"/jobs/{job_id}/run")
+    run_payload = client.get(f"/jobs/{job_id}").json()
     original_spec_id = run_payload["latest_analysis_artifact_ids"]["candidate_spec"]
     original_report_id = run_payload["latest_analysis_artifact_ids"]["validation_report"]
 
@@ -1525,6 +1676,7 @@ def test_patch_spec_route_applies_allowed_change_and_appends_artifacts():
         },
     )
 
+    assert run_response.status_code == 202
     assert response.status_code == 200
     payload = response.json()
     patched_element = next(
@@ -1546,7 +1698,8 @@ def test_patch_spec_route_applies_allowed_change_and_appends_artifacts():
     assert len(artifacts["correction_plan"]) == 1
 
 
-def test_patch_spec_route_rejects_stale_client_version():
+def test_patch_spec_route_rejects_stale_client_version(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1565,7 +1718,8 @@ def test_patch_spec_route_rejects_stale_client_version():
     assert response.status_code == 422
 
 
-def test_patch_spec_route_reports_version_conflict_without_changing_latest_spec():
+def test_patch_spec_route_reports_version_conflict_without_changing_latest_spec(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1601,7 +1755,8 @@ def test_patch_spec_route_reports_version_conflict_without_changing_latest_spec(
     assert client.get(f"/jobs/{job_id}/candidate-spec").json() == latest_before_conflict
 
 
-def test_patch_spec_route_rejects_disallowed_path_without_changing_latest_spec():
+def test_patch_spec_route_rejects_disallowed_path_without_changing_latest_spec(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1642,7 +1797,8 @@ def test_patch_spec_route_returns_spec_not_ready_before_run():
     assert_error(response, "SPEC_NOT_READY")
 
 
-def test_render_route_saves_svg_artifact_and_rendered_preview_returns_latest():
+def test_render_route_saves_svg_artifact_and_rendered_preview_returns_latest(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1675,7 +1831,9 @@ def test_rendered_preview_route_returns_404_before_render():
 def run_and_render_job(client: TestClient) -> tuple[str, dict[str, object], dict[str, object]]:
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
-    run_payload = client.post(f"/jobs/{job_id}/run").json()
+    run_response = client.post(f"/jobs/{job_id}/run")
+    assert run_response.status_code == 202
+    run_payload = client.get(f"/jobs/{job_id}").json()
     render_payload = client.post(f"/jobs/{job_id}/render").json()
     return job_id, run_payload, render_payload
 
@@ -1690,7 +1848,8 @@ def test_export_route_requires_approved_job():
     assert_error(response, "EXPORT_JOB_NOT_READY")
 
 
-def test_export_route_requires_latest_render_artifact():
+def test_export_route_requires_latest_render_artifact(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id = client.post("/jobs").json()["job_id"]
     upload_required_images(client, job_id)
@@ -1702,7 +1861,8 @@ def test_export_route_requires_latest_render_artifact():
     assert_error(response, "EXPORT_RENDER_NOT_READY")
 
 
-def test_export_route_rejects_unsupported_format():
+def test_export_route_rejects_unsupported_format(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id, _, _ = run_and_render_job(client)
 
@@ -1716,7 +1876,8 @@ def test_export_route_rejects_unsupported_format():
     }
 
 
-def test_export_route_saves_png_artifact_and_downloads_it():
+def test_export_route_saves_png_artifact_and_downloads_it(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id, run_payload, render_payload = run_and_render_job(client)
 
@@ -1751,7 +1912,8 @@ def test_export_route_saves_png_artifact_and_downloads_it():
     assert download_response.content.startswith(b"\x89PNG\r\n\x1a\n")
 
 
-def test_latest_export_route_returns_404_before_export():
+def test_latest_export_route_returns_404_before_export(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id, _, _ = run_and_render_job(client)
 
@@ -1761,7 +1923,8 @@ def test_latest_export_route_returns_404_before_export():
     assert_error(response, "EXPORT_ARTIFACT_NOT_FOUND")
 
 
-def test_export_download_returns_404_for_unknown_export_id():
+def test_export_download_returns_404_for_unknown_export_id(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id, _, _ = run_and_render_job(client)
 
@@ -1771,7 +1934,8 @@ def test_export_download_returns_404_for_unknown_export_id():
     assert_error(response, "EXPORT_ARTIFACT_NOT_FOUND")
 
 
-def test_export_route_rejects_stale_render_candidate_spec():
+def test_export_route_rejects_stale_render_candidate_spec(monkeypatch):
+    use_inline_job_executor(monkeypatch)
     client = TestClient(app)
     job_id, _, _ = run_and_render_job(client)
     patch_response = client.patch(
