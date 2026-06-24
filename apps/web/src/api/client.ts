@@ -164,6 +164,11 @@ export async function runJob(jobId: string, baseUrl = '', fetcher: typeof fetch 
   return readJson<JobResponse>(response, '작업을 실행하지 못했습니다.');
 }
 
+export async function getJob(jobId: string, baseUrl = '', fetcher: typeof fetch = fetch): Promise<JobResponse> {
+  const response = await fetcher(`${baseUrl}/jobs/${jobId}`);
+  return readJson<JobResponse>(response, '작업 상태를 불러오지 못했습니다.');
+}
+
 export async function getReviewItems(
   jobId: string,
   baseUrl = '',
@@ -181,12 +186,16 @@ export function streamProgressEvents(
     eventSourceFactory = (url: string) => new EventSource(url),
     onProgress,
     onComplete,
+    onFailed,
+    onCancelled,
     onError
   }: {
     baseUrl?: string;
     eventSourceFactory?: (url: string) => EventSourceLike;
     onProgress?: (event: ProgressEventPayload) => void;
     onComplete?: () => void;
+    onFailed?: () => void;
+    onCancelled?: () => void;
     onError?: (error: Error) => void;
   } = {}
 ): () => void {
@@ -225,10 +234,17 @@ export function streamProgressEvents(
     onComplete?.();
   });
 
-  source.onerror = () => {
+  source.addEventListener('failed', () => {
     close();
-    onError?.(new ProgressStreamError('진행 상황 연결이 끊겼습니다.'));
-  };
+    onFailed?.();
+  });
+
+  source.addEventListener('cancelled', () => {
+    close();
+    onCancelled?.();
+  });
+
+  source.onerror = () => {};
 
   return close;
 }
@@ -354,74 +370,55 @@ export async function runUploadToReviewWorkflow(
   await uploadImage(created.job_id, 'teacher_solution', input.teacherSolutionFile, baseUrl, fetcher);
   onPhase?.('running');
   const run = await runJob(created.job_id, baseUrl, fetcher);
-  const progressEvents = await collectProgressEvents(created.job_id, {
+  if (run.status !== 'RUNNING') {
+    throw new Error('작업 실행을 시작하지 못했습니다.');
+  }
+  const progressEvents = await waitForLiveProgress(created.job_id, {
     baseUrl,
-    fetcher,
     eventSourceFactory,
     onProgress
   });
+  const finalJob = await getJob(created.job_id, baseUrl, fetcher);
   const candidateSpec = await getCandidateSpec(created.job_id, baseUrl, fetcher);
   const reviewItems = await getReviewItems(created.job_id, baseUrl, fetcher);
 
   return {
     jobId: created.job_id,
-    status: run.status,
-    revisionAttempts: run.revision_attempts ?? 0,
+    status: finalJob.status,
+    revisionAttempts: finalJob.revision_attempts ?? 0,
     reviewItems,
     candidateSpec,
     progressEvents
   };
 }
 
-async function collectProgressEvents(
+async function waitForLiveProgress(
   jobId: string,
   {
     baseUrl,
-    fetcher,
     eventSourceFactory,
     onProgress
   }: {
     baseUrl: string;
-    fetcher: typeof fetch;
     eventSourceFactory?: (url: string) => EventSourceLike;
     onProgress?: (event: ProgressEventPayload) => void;
   }
 ): Promise<ProgressEventPayload[]> {
-  const deliveredEvents: ProgressEventPayload[] = [];
-  const deliveredEventKeys = new Set<string>();
-  const forwardProgress = (event: ProgressEventPayload) => {
-    deliveredEvents.push(event);
-    deliveredEventKeys.add(progressEventKey(event));
-    onProgress?.(event);
-  };
-
-  try {
-    return await replayProgressEvents(jobId, { baseUrl, eventSourceFactory, onProgress: forwardProgress });
-  } catch (error) {
-    if (!(error instanceof ProgressStreamError)) {
-      throw error;
-    }
-    let events: ProgressEventPayload[];
-    try {
-      events = await getProgressEvents(jobId, baseUrl, fetcher);
-    } catch {
-      return [];
-    }
-    for (const event of events) {
-      const eventKey = progressEventKey(event);
-      if (deliveredEventKeys.has(eventKey)) {
-        continue;
-      }
-      deliveredEvents.push(event);
-      deliveredEventKeys.add(eventKey);
-      onProgress?.(event);
-    }
-    return deliveredEvents;
-  }
-}
-
-function progressEventKey(event: ProgressEventPayload): string {
-  return `${event.job_id}:${event.event_id}:${event.sequence}`;
+  return new Promise((resolve, reject) => {
+    const events: ProgressEventPayload[] = [];
+    streamProgressEvents(jobId, {
+      baseUrl,
+      eventSourceFactory,
+      onProgress: (event) => {
+        events.push(event);
+        onProgress?.(event);
+      },
+      onComplete: () => resolve(events),
+      onFailed: () => reject(new ProgressStreamError('작업 실행 중 오류가 발생했습니다.')),
+      onCancelled: () => reject(new ProgressStreamError('작업이 취소되었습니다.')),
+      onError: reject
+    });
+  });
 }
 
 function normalizeReviewItem(item: ApiReviewItem): ReviewItem {
