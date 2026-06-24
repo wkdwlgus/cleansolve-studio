@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any, NotRequired, TypedDict
 
 
@@ -22,6 +23,7 @@ class WorkflowState(TypedDict, total=False):
     latest_review_issues: list[Any]
     review_tool_decisions: list[Any]
     review_event_sequence: int
+    progress_event_sink: NotRequired[Callable[[Any], None]]
     source_image_artifact_ids: NotRequired[dict[str, str | None]]
     source_image_paths: NotRequired[dict[str, str]]
     analysis_client_kind: str

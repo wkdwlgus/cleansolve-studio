@@ -67,6 +67,7 @@ ProgressStatus = Literal[
     "NEEDS_REVIEW",
     "REVISION_REQUIRED",
     "FAILED",
+    "CANCELLED",
 ]
 
 NextAction = Literal[
@@ -221,6 +222,7 @@ PROGRESS_MESSAGE_ALLOWLIST = frozenset(
         "사용자 검수가 필요합니다.",
         "자동 수정 한도에 도달했습니다.",
         "작업이 실패했습니다.",
+        "작업이 취소되었습니다.",
     }
 )
 
@@ -276,6 +278,9 @@ def append_progress_event(
     )
     state.setdefault("progress_events", []).append(event)
     state["review_event_sequence"] = sequence + 1
+    sink = state.get("progress_event_sink")
+    if callable(sink):
+        sink(event)
     return event
 
 

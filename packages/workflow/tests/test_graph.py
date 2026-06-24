@@ -130,6 +130,40 @@ def test_workflow_propagates_analysis_adapter_error():
         )
 
 
+def test_run_mock_workflow_calls_progress_event_sink():
+    events = []
+
+    state = run_mock_workflow(
+        "job_sink_test",
+        source_image_artifact_ids={
+            "problem": "img_problem_123",
+            "teacher_solution": "img_teacher_456",
+        },
+        progress_event_sink=events.append,
+    )
+
+    assert len(events) == len(state["progress_events"])
+    assert [event.event_id for event in events] == [
+        event.event_id for event in state["progress_events"]
+    ]
+    assert events[0].message == "작업을 시작했습니다."
+
+
+def test_run_mock_workflow_fails_when_progress_event_sink_fails():
+    def failing_sink(_event):
+        raise RuntimeError("progress sink failed")
+
+    with pytest.raises(RuntimeError, match="progress sink failed"):
+        run_mock_workflow(
+            "job_sink_failure",
+            source_image_artifact_ids={
+                "problem": "img_problem_123",
+                "teacher_solution": "img_teacher_456",
+            },
+            progress_event_sink=failing_sink,
+        )
+
+
 def test_workflow_does_not_approve_invalid_candidate_spec():
     candidate_spec = MockAnalysisClient().extract_candidate_spec("job_invalid")
     candidate_spec.elements = [
