@@ -39,6 +39,16 @@ ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg"}
 MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024
 UPLOAD_CHUNK_BYTES = 1024 * 1024
 JOB_ID_PATTERN = re.compile(r"^job_[0-9a-f]{32}$")
+SAFE_REVIEW_ITEM_TEXT_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+SAFE_BACKGROUND_FAILURE_REASONS = frozenset(
+    {
+        "configuration_error",
+        "response_error",
+        "internal_error",
+        "progress_write_failed",
+        "analysis_source_changed",
+    }
+)
 ANALYSIS_ARTIFACT_TYPES: tuple[AnalysisArtifactType, ...] = (
     "candidate_spec",
     "validation_report",
@@ -329,6 +339,18 @@ def missing_required_images_error(missing_roles: list[ImageRole]) -> HTTPExcepti
     )
 
 
+def _safe_background_failure_reason(reason: str) -> str:
+    if reason in SAFE_BACKGROUND_FAILURE_REASONS:
+        return reason
+    return "internal_error"
+
+
+def _safe_review_item_text(value: Any, default: str) -> str:
+    if isinstance(value, str) and SAFE_REVIEW_ITEM_TEXT_PATTERN.fullmatch(value):
+        return value
+    return default
+
+
 def job_already_running_error(job_id: str) -> HTTPException:
     return _error("JOB_ALREADY_RUNNING", status.HTTP_409_CONFLICT, {"job_id": job_id})
 
@@ -546,12 +568,16 @@ class LocalArtifactStore:
             )
             analysis_artifacts["progress_events"].append(progress_artifact)
             latest_analysis_artifact_ids["progress_events"] = progress_artifact.artifact_id
+            safe_reason = _safe_background_failure_reason(reason)
             safe_review_item = {
-                "type": review_item.get("type"),
-                "client": review_item.get("client"),
-                "retryable": review_item.get("retryable"),
-                "review_reason": review_item.get("review_reason"),
-                "safe_reason": reason,
+                "type": _safe_review_item_text(
+                    review_item.get("type"),
+                    "analysis_adapter_failed",
+                ),
+                "client": _safe_review_item_text(review_item.get("client"), "unknown"),
+                "retryable": bool(review_item.get("retryable")),
+                "review_reason": None,
+                "safe_reason": safe_reason,
             }
             updated_manifest = JobManifest.model_validate(
                 {

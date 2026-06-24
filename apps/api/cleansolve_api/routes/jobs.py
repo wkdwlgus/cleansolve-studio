@@ -203,6 +203,13 @@ def run_job(job_id: str) -> dict[str, object]:
             reason=reason,
         )
         raise analysis_adapter_failed_error(settings.analysis_client, reason) from exc
+    except Exception as exc:
+        store.save_failed_analysis_run(
+            job_id,
+            client=settings.analysis_client,
+            reason="internal_error",
+        )
+        raise analysis_adapter_failed_error(settings.analysis_client, "internal_error") from exc
     review_correction_payload = {
         "job_id": job_id,
         "review_attempts": [

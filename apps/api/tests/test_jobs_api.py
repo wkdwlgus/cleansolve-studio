@@ -173,6 +173,32 @@ def test_run_with_openai_sdk_failure_returns_502_without_analysis_artifacts(monk
     assert "private" not in str(response.json())
 
 
+def test_run_with_unexpected_workflow_failure_marks_job_failed_without_leaking(monkeypatch):
+    def fail_workflow(**_kwargs):
+        raise RuntimeError("sk-secret /private/problem.png")
+
+    monkeypatch.setattr(jobs, "run_mock_workflow", fail_workflow)
+    client = TestClient(app, raise_server_exceptions=False)
+    job_id = client.post("/jobs").json()["job_id"]
+    upload_required_images(client, job_id)
+
+    response = client.post(f"/jobs/{job_id}/run")
+    job_response_payload = client.get(f"/jobs/{job_id}").json()
+
+    assert response.status_code == 502
+    assert_error(response, "ANALYSIS_ADAPTER_FAILED")
+    assert response.json()["detail"]["fields"] == {
+        "client": "mock",
+        "reason": "internal_error",
+    }
+    assert job_response_payload["status"] == "FAILED"
+    assert job_response_payload["review_items"][-1]["safe_reason"] == "internal_error"
+    assert "sk-" not in str(response.json())
+    assert "private" not in str(response.json())
+    assert "sk-" not in str(job_response_payload)
+    assert "private" not in str(job_response_payload)
+
+
 def test_run_requires_required_images_with_structured_error():
     client = TestClient(app)
 
@@ -686,18 +712,19 @@ def test_store_save_failed_background_run_persists_only_safe_review_item_fields(
 
     updated = store.save_failed_background_run(
         manifest.job_id,
-        reason="configuration_error",
+        reason="sk-secret /private/problem.png",
         review_item={
             "type": "analysis_adapter_failed",
             "client": "openai",
             "retryable": True,
-            "review_reason": None,
+            "review_reason": "/private/path",
             "safe_reason": "caller_reason",
             "exception_message": "raw exception",
             "local_path": "/tmp/private/input.png",
             "prompt": "raw prompt",
             "api_key": "sk-secret",
             "source_image_paths": {"problem": "/tmp/private/problem.png"},
+            "raw_model_output": "raw model output",
         },
         progress_events_payload={"job_id": manifest.job_id, "events": []},
         source_image_artifact_ids=ids,
@@ -708,8 +735,12 @@ def test_store_save_failed_background_run_persists_only_safe_review_item_fields(
         "client": "openai",
         "retryable": True,
         "review_reason": None,
-        "safe_reason": "configuration_error",
+        "safe_reason": "internal_error",
     }
+    assert "sk-" not in str(updated.model_dump(mode="json"))
+    assert "/private" not in str(updated.model_dump(mode="json"))
+    assert "raw prompt" not in str(updated.model_dump(mode="json"))
+    assert "raw model output" not in str(updated.model_dump(mode="json"))
 
 
 @pytest.mark.parametrize("status_value", ["CREATED", "APPROVED"])
