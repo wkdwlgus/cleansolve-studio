@@ -120,6 +120,21 @@ describe('workflow state transitions', () => {
     });
   });
 
+  it('keeps reconnect replay duplicates deduped by event id', () => {
+    const first = nextWorkflowState(initialWorkflowState, { type: 'progress-server', event: progressEvent });
+    const replay = nextWorkflowState(first, {
+      type: 'progress-server',
+      event: { ...progressEvent, message: '작업을 시작했습니다.' }
+    });
+
+    expect(replay.progressItems).toHaveLength(1);
+    expect(replay.progressItems[0]).toMatchObject({
+      source: 'server',
+      id: 'evt_0000',
+      active: true
+    });
+  });
+
   it('marks progress items inactive when ready', () => {
     const withProgress = nextWorkflowState(initialWorkflowState, { type: 'progress-server', event: progressEvent });
     const job = {
